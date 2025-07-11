@@ -1,3 +1,4 @@
+/* eslint-disable no-unreachable */
 import React, { useState, useRef, useEffect } from 'react';
 import { io } from 'socket.io-client';
 import './App.css';
@@ -189,31 +190,6 @@ function App() {
         } catch (error) {
           console.error('Error creating group:', error);
           alert('Error creating group. Please try again.');
-        }
-        break;
-     
-        try {
-          const response = await fetch(`http://localhost:3001/api/groups/${data._id}/join`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              userEmail: email
-            })
-          });
-          
-          if (response.ok) {
-            const result = await response.json();
-            console.log('Joined group successfully:', result);
-            alert('Joined group successfully!');
-          } else {
-            console.error('Failed to join group');
-            alert('Failed to join group. Please try again.');
-          }
-        } catch (error) {
-          console.error('Error joining group:', error);
-          alert('Error joining group. Please try again.');
         }
         break;
       default:
