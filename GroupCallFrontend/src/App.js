@@ -81,9 +81,42 @@ function App() {
         if (groupsPopoverRef.current) groupsPopoverRef.current.refreshGroups();
       });
 
+      socketRef.current.on('group:member-exited', (data) => {
+        fetchPendingInvites();
+        if (groupsPopoverRef.current) groupsPopoverRef.current.refreshGroups();
+      });
+
       socketRef.current.on('group:deleted', (data) => {
         fetchPendingInvites();
         if (groupsPopoverRef.current) groupsPopoverRef.current.refreshGroups();
+      });
+
+      // Call invitation handling
+      socketRef.current.on('call:invite', (data) => {
+        const { meetingId, host, title } = data;
+        const shouldAccept = window.confirm(`${host} is inviting you to join: ${title}. Accept?`);
+        
+        if (shouldAccept) {
+          socketRef.current.emit('call:accept', {
+            meetingId,
+            email: email
+          });
+          setActiveRoom(meetingId);
+        } else {
+          socketRef.current.emit('call:decline', {
+            meetingId,
+            email: email,
+            hostEmail: host
+          });
+        }
+      });
+
+      socketRef.current.on('call:ended', (data) => {
+        const { meetingId } = data;
+        if (activeRoom === meetingId) {
+          setActiveRoom(null);
+          alert('Call has ended');
+        }
       });
 
       socketRef.current.on('disconnect', () => {
@@ -162,9 +195,64 @@ function App() {
   const handlePopoverAction = async (action, data) => {
     switch (action) {
       case 'start-call':
-        console.log('Starting call with:', data);
-        // TODO: Implement group call logic
+        try {
+          console.log('Starting call with:', data);
+          
+          // Unified participant extraction and validation
+          let participants, title;
+          
+          if (Array.isArray(data)) {
+            // From InitiateCallPopover - array of user objects
+            participants = data.map(user => user.email);
+            title = 'Group Call';
+          } else if (data.members) {
+            // From GroupsListPopover - group object
+            participants = data.members
+              .filter(member => member.status === 'accepted')
+              .map(member => member.email);
+            title = `Group Call - ${data.name}`;
+          } else {
+            throw new Error('Invalid data format for call initiation');
+          }
+          
+          if (participants.length === 0) {
+            alert('No participants available for the call.');
+            return;
+          }
+          
+          // Create meeting
+          const response = await fetch('http://localhost:3001/api/meetings/create', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              hostEmail: email,
+              participants: participants,
+              title: title
+            })
+          });
+          
+          if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || 'Failed to create meeting');
+          }
+          
+          const result = await response.json();
+          setActiveRoom(result.meeting.meetingId);
+          
+          // Send call invitations
+          socketRef.current.emit('call:initiate', {
+            hostEmail: email,
+            participants: participants,
+            title: title
+          });
+          
+          alert('Call started successfully!');
+        } catch (error) {
+          console.error('Error starting call:', error);
+          alert(`Failed to start call: ${error.message}`);
+        }
         break;
+        
       case 'create-group':
         try {
           const response = await fetch('http://localhost:3001/api/groups', {
@@ -179,17 +267,17 @@ function App() {
             })
           });
           
-          if (response.ok) {
-            const result = await response.json();
-            console.log('Group created successfully:', result);
-            alert('Group created successfully!');
-          } else {
-            console.error('Failed to create group');
-            alert('Failed to create group. Please try again.');
+          if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || 'Failed to create group');
           }
+          
+          const result = await response.json();
+          console.log('Group created successfully:', result);
+          alert('Group created successfully!');
         } catch (error) {
           console.error('Error creating group:', error);
-          alert('Error creating group. Please try again.');
+          alert(`Error creating group: ${error.message}`);
         }
         break;
       default:
@@ -324,9 +412,10 @@ function App() {
         </div>
       ) : (
         <GroupCall
-          user={{ id: email, name: email }}
+          user={{ id: email, name: email, email: email }}
           onLeave={handleLeave}
-          initialParticipants={[email, activeRoom]}
+          meetingId={activeRoom}
+          socket={socketRef.current}
         />
       )}
       
@@ -339,6 +428,7 @@ function App() {
         data={onlineUsers}
         onAction={handlePopoverAction}
         currentUserEmail={email}
+        socket={socketRef.current}
       />
     </div>
   );

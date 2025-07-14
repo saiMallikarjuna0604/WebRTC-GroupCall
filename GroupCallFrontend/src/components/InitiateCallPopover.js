@@ -21,10 +21,14 @@ const InitiateCallPopover = ({ data, onClose, onAction, currentUserEmail }) => {
   };
 
   const handleStartCall = () => {
-    if (selectedUsers.length > 0) {
-      onAction('start-call', selectedUsers);
-      onClose();
+    if (selectedUsers.length === 0) {
+      alert('Please select at least one user to start a call.');
+      return;
     }
+    
+    // Pass the selected users array to the parent component
+    onAction('start-call', selectedUsers);
+    onClose();
   };
 
   const isUserSelected = (user) => {

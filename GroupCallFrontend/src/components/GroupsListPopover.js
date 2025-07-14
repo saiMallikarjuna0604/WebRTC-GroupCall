@@ -1,6 +1,7 @@
+/* eslint-disable react-hooks/exhaustive-deps */
 import React, { useState, useEffect, useImperativeHandle, forwardRef } from 'react';
 
-const GroupsListPopover = forwardRef(({ data, onClose, onAction, currentUserEmail, onGroupsRefresh }, ref) => {
+const GroupsListPopover = forwardRef(({ data, onClose, onAction, currentUserEmail, onGroupsRefresh, socket }, ref) => {
   const [userGroups, setUserGroups] = useState([]);
   const [loading, setLoading] = useState(true);
   const [expandedGroupId, setExpandedGroupId] = useState(null);
@@ -16,6 +17,21 @@ const GroupsListPopover = forwardRef(({ data, onClose, onAction, currentUserEmai
   useEffect(() => {
     fetchUserGroups();
   }, []);
+
+  useEffect(() => {
+    if (socket) {
+      const handleMemberExited = (data) => {
+        console.log('Member exited group:', data);
+        fetchUserGroups();
+      };
+
+      socket.on('group:member-exited', handleMemberExited);
+
+      return () => {
+        socket.off('group:member-exited', handleMemberExited);
+      };
+    }
+  }, [socket]);
 
   // Fetch all users for add modal
   const fetchAllUsers = async () => {
@@ -92,6 +108,11 @@ const GroupsListPopover = forwardRef(({ data, onClose, onAction, currentUserEmai
     closeAddModal();
   };
 
+  const handleExitGroup = (groupId) => {
+    if (!window.confirm('Are you sure you want to exit this group?')) return;
+    handleGroupAction(groupId, 'exit', { targetEmail: currentUserEmail, actorEmail: currentUserEmail });
+  };
+
   const handleDeleteGroup = async (groupId) => {
     if (!window.confirm('Are you sure you want to delete this group?')) return;
     try {
@@ -115,6 +136,7 @@ const GroupsListPopover = forwardRef(({ data, onClose, onAction, currentUserEmai
 
   const isGroupCreator = (group) => group.createdBy === currentUserEmail;
   const isPendingMember = (group) => getMemberStatus(group, currentUserEmail) === 'pending';
+  const isAcceptedMember = (group) => getMemberStatus(group, currentUserEmail) === 'accepted';
 
   if (loading) {
     return (
@@ -198,7 +220,14 @@ const GroupsListPopover = forwardRef(({ data, onClose, onAction, currentUserEmai
                           <>
                             <button 
                               className="start-call-button"
-                              onClick={() => onAction('start-group-call', group)}
+                              onClick={() => {
+                                const acceptedMembers = group.members.filter(m => m.status === 'accepted');
+                                if (acceptedMembers.length === 0) {
+                                  alert('No accepted members in this group to call.');
+                                  return;
+                                }
+                                onAction('start-call', group);
+                              }}
                             >
                               Start Call
                             </button>
@@ -225,6 +254,14 @@ const GroupsListPopover = forwardRef(({ data, onClose, onAction, currentUserEmai
                               Decline
                             </button>
                           </>
+                        )}
+                        {!isGroupCreator(group) && isAcceptedMember(group) && (
+                          <button 
+                            className="exit-group-button"
+                            onClick={() => handleExitGroup(group._id)}
+                          >
+                            Exit Group
+                          </button>
                         )}
                       </div>
                     </div>

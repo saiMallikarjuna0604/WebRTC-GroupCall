@@ -3,13 +3,13 @@ import GroupsListPopover from './GroupsListPopover';
 import InitiateCallPopover from './InitiateCallPopover';
 import CreateGroupPopover from './CreateGroupPopover';
 
-const Popover = forwardRef(({ type, isOpen, onClose, data, onAction, currentUserEmail }, ref) => {
+const Popover = forwardRef(({ type, isOpen, onClose, data, onAction, currentUserEmail, socket }, ref) => {
   if (!isOpen) return null;
 
   const renderContent = () => {
     switch (type) {
       case 'groups':
-        return <GroupsListPopover ref={ref} data={data} onClose={onClose} onAction={onAction} currentUserEmail={currentUserEmail} />;
+        return <GroupsListPopover ref={ref} data={data} onClose={onClose} onAction={onAction} currentUserEmail={currentUserEmail} socket={socket} />;
       case 'initiate':
         return <InitiateCallPopover data={data} onClose={onClose} onAction={onAction} currentUserEmail={currentUserEmail} />;
       case 'create':
