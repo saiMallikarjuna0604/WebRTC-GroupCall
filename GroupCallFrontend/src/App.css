@@ -1,7 +1,7 @@
 .App {
   min-height: 100vh;
   background: linear-gradient(135deg, #85ccec 0%, #89eae2 100%);
-  color: white;
+  /* color: white; */
   overflow: hidden; /* Prevent body scroll */
 }
 
@@ -578,6 +578,24 @@ video {
   background: #dc2626;
 }
 
+.end-call-btn {
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  color: white;
+  border: none;
+  padding: 0.75rem 1.5rem;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.end-call-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
+  background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+}
+
 /* Popover Styles */
 .popover-overlay {
   position: fixed;
@@ -601,7 +619,7 @@ video {
   max-width: 500px;
   width: 90%;
   max-height: 80vh;
-  overflow: hidden;
+  overflow: auto;
   animation: slideUp 0.3s ease;
 }
 

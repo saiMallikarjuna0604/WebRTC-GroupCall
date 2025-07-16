@@ -46,6 +46,9 @@ app.use((req, res, next) => {
 // Store socket connections in app.locals for route access
 app.locals.connections = new Map();
 
+// Store pending calls for timeout handling
+app.locals.pendingCalls = new Map(); // meetingId -> { hostEmail, participants, timeoutId, respondedParticipants }
+
 // API Routes
 app.use('/api/users', userRoutes);
 app.use('/api/groups', groupRoutes);
@@ -133,6 +136,11 @@ io.on('connection', async (socket) => {
     socket.on('call:end', async (data) => {
         console.log('Call end received:', data);
         await handleCallEnd(socket, data);
+    });
+
+    socket.on('call:cancel', async (data) => {
+        console.log('Call cancel received:', data);
+        await handleCallCancel(socket, data);
     });
 
     socket.on('call:rejoin', async (data) => {
@@ -241,33 +249,121 @@ io.on('connection', async (socket) => {
 async function handleCallInitiate(socket, data) {
     try {
         console.log('Handling call initiation:', data);
-        const { hostEmail, participants, title } = data;
+        const { hostEmail, participants, title, meetingId } = data;
         
-        // Create meeting via API call
-        const response = await fetch('http://localhost:3001/api/meetings/create', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ hostEmail, participants, title })
+        // Validate that the meeting exists and belongs to the host
+        const response = await fetch(`http://localhost:3001/api/meetings/${meetingId}`);
+        if (!response.ok) {
+            console.error('Meeting not found or access denied:', meetingId);
+            return;
+        }
+        
+        const result = await response.json();
+        const meeting = result.meeting;
+        
+        // Verify the host owns this meeting
+        if (meeting.hostEmail !== hostEmail) {
+            console.error('Host does not own this meeting:', { hostEmail, meetingHost: meeting.hostEmail });
+            return;
+        }
+        
+        console.log('Using existing meeting:', meetingId);
+        
+        // Set up timeout for call (40 seconds)
+        const timeoutId = setTimeout(() => {
+            console.log('TIMEOUT FIRED for meeting:', meetingId, 'at:', new Date().toISOString());
+            handleCallTimeout(meetingId, hostEmail, participants);
+        }, 40000);
+        
+        console.log('Timeout set for meeting:', meetingId, 'timeoutId:', timeoutId, 'will fire at:', new Date(Date.now() + 40000).toISOString());
+        
+        // Store pending call
+        app.locals.pendingCalls.set(meetingId, {
+            hostEmail,
+            participants,
+            timeoutId,
+            respondedParticipants: new Set() // Track who has responded
         });
         
-        if (response.ok) {
-            const result = await response.json();
-            console.log('Meeting created:', result);
-            
-            // Send invitations to participants
-            participants.forEach(email => {
-                const participantSocket = app.locals.connections.get(email);
-                if (participantSocket) {
-                    participantSocket.emit('call:invite', { 
-                        meetingId: result.meeting.meetingId, 
-                        host: hostEmail,
-                        title: title || 'Group Call'
-                    });
-                }
-            });
-        }
+        console.log('Pending call stored:', { meetingId, participants });
+        
+        // Send invitations to participants
+        participants.forEach(email => {
+            const participantSocket = app.locals.connections.get(email);
+            if (participantSocket) {
+                participantSocket.emit('call:invite', { 
+                    meetingId: meetingId, 
+                    host: hostEmail,
+                    title: title || 'Group Call'
+                });
+            }
+        });
     } catch (error) {
         console.error('Error handling call initiation:', error);
+    }
+}
+
+async function handleCallTimeout(meetingId, hostEmail, participants) {
+    try {
+        console.log('Call timeout for meeting:', meetingId);
+        
+        // Get the pending call to check who has responded
+        const pendingCall = app.locals.pendingCalls.get(meetingId);
+        
+        if (pendingCall) {
+            // Only send timeout to participants who haven't responded
+            const unrespondedParticipants = pendingCall.participants.filter(
+                email => !pendingCall.respondedParticipants.has(email)
+            );
+            
+            console.log('Unresponded participants for timeout:', unrespondedParticipants);
+            console.log('All participants:', pendingCall.participants);
+            console.log('Responded participants:', Array.from(pendingCall.respondedParticipants));
+            
+            // Send timeout to host if they haven't cancelled (host is separate from participants)
+            const hostSocket = app.locals.connections.get(hostEmail);
+            if (hostSocket) {
+                // Send status updates for unresponded participants
+                unrespondedParticipants.forEach(email => {
+                    hostSocket.emit('participant:status-update', { 
+                        meetingId, 
+                        email, 
+                        status: 'timeout',
+                        action: 'timeout'
+                    });
+                });
+                
+                // Send single timeout event to host
+                console.log('Sending timeout event to host:', hostEmail);
+                hostSocket.emit('call:timeout', { 
+                    meetingId, 
+                    hostEmail,
+                    participants: unrespondedParticipants 
+                });
+            }
+            
+            // Notify unresponded participants about timeout (use filtered array)
+            unrespondedParticipants.forEach(email => {
+                const participantSocket = app.locals.connections.get(email);
+                if (participantSocket) {
+                    console.log('Sending timeout event to unresponded participant:', email);
+                    participantSocket.emit('call:timeout', { meetingId, hostEmail });
+                }
+            });
+            
+            // Remove from pending calls AFTER processing
+            app.locals.pendingCalls.delete(meetingId);
+        }
+        
+        // End meeting via API call
+        const response = await fetch(`http://localhost:3001/api/meetings/${meetingId}/action`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: 'end', hostEmail })
+        });
+        
+    } catch (error) {
+        console.error('Error handling call timeout:', error);
     }
 }
 
@@ -275,6 +371,17 @@ async function handleCallAccept(socket, data) {
     try {
         console.log('Handling call acceptance:', data);
         const { meetingId, email } = data;
+        
+        // Clear timeout and remove from pendingCalls since someone joined the call
+        const pendingCall = app.locals.pendingCalls.get(meetingId);
+        console.log('Pending call for accept:', pendingCall);
+        if (pendingCall) {
+            // Track that this participant responded
+            pendingCall.respondedParticipants.add(email);
+            clearTimeout(pendingCall.timeoutId);
+            app.locals.pendingCalls.delete(meetingId);
+            console.log('Removed from pendingCalls after accept:', meetingId);
+        }
         
         // Join meeting via API call
         const response = await fetch(`http://localhost:3001/api/meetings/${meetingId}/action`, {
@@ -284,6 +391,20 @@ async function handleCallAccept(socket, data) {
         });
         
         if (response.ok) {
+            // Notify host about participant acceptance
+            const pendingCall = app.locals.pendingCalls.get(meetingId);
+            if (pendingCall) {
+                const hostSocket = app.locals.connections.get(pendingCall.hostEmail);
+                if (hostSocket) {
+                    hostSocket.emit('participant:status-update', { 
+                        meetingId, 
+                        email, 
+                        status: 'answered',
+                        action: 'accept'
+                    });
+                }
+            }
+            
             // Notify other participants
             socket.broadcast.emit('participant:joined', { meetingId, email });
         }
@@ -297,9 +418,28 @@ async function handleCallDecline(socket, data) {
         console.log('Handling call decline:', data);
         const { meetingId, email, hostEmail } = data;
         
-        // Notify host about decline
+        // Track that this participant responded but keep call pending for others
+        const pendingCall = app.locals.pendingCalls.get(meetingId);
+        console.log('Pending call for decline:', pendingCall);
+        if (pendingCall) {
+            // Track that this participant responded
+            pendingCall.respondedParticipants.add(email);
+            // DON'T clear timeout - let it continue for remaining participants
+            // clearTimeout(pendingCall.timeoutId);
+            console.log('Participant declined but keeping timeout for others:', meetingId);
+        }
+        
+        // Notify host about decline with detailed status
         const hostSocket = app.locals.connections.get(hostEmail);
         if (hostSocket) {
+            hostSocket.emit('participant:status-update', { 
+                meetingId, 
+                email, 
+                status: 'declined',
+                action: 'decline'
+            });
+            
+            // Also emit the legacy event for backward compatibility
             hostSocket.emit('call:declined', { meetingId, email });
         }
     } catch (error) {
@@ -342,22 +482,102 @@ async function handleCallLeave(socket, data) {
 
 async function handleCallEnd(socket, data) {
     try {
-        console.log('Handling call end:', data);
+        console.log('Handling call end (active call):', data);
         const { meetingId, hostEmail } = data;
         
+        console.log('All pending calls:', Array.from(app.locals.pendingCalls.keys()));
+        
+        // Check if meeting exists and get its current state
+        const response = await fetch(`http://localhost:3001/api/meetings/${meetingId}`);
+        let meetingState = null;
+        let hasActiveParticipants = false;
+        
+        if (response.ok) {
+            const result = await response.json();
+            meetingState = result.meeting;
+            console.log('Meeting state for end:', meetingState);
+            // Check if any participants have joined (excluding host)
+            hasActiveParticipants = meetingState.participants.some(p => p.email !== hostEmail);
+        }
+        
+        // Clear timeout for this call if it exists and remove from pendingCalls
+        const pendingCall = app.locals.pendingCalls.get(meetingId);
+        console.log('Pending call found for end:', pendingCall);
+        
+        if (pendingCall) {
+            clearTimeout(pendingCall.timeoutId);
+            app.locals.pendingCalls.delete(meetingId);
+            console.log('Removed from pendingCalls after end:', meetingId);
+        }
+        
+        // This is an active call ending - notify all participants
+        console.log('Active call ending - emitting call:ended');
+        socket.broadcast.emit('call:ended', { meetingId });
+        
+        // End meeting via API call
+        const endResponse = await fetch(`http://localhost:3001/api/meetings/${meetingId}/action`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: 'end', hostEmail })
+        });
+        
+        if (!endResponse.ok) {
+            console.error('Failed to end meeting via API');
+        }
+    } catch (error) {
+        console.error('Error handling call end:', error);
+    }
+}
+
+async function handleCallCancel(socket, data) {
+    try {
+        console.log('Handling call cancel:', data);
+        const { meetingId, hostEmail } = data;
+
+        // Clear timeout for this call if it exists and remove from pendingCalls
+        const pendingCall = app.locals.pendingCalls.get(meetingId);
+        console.log('Pending call found for cancel:', pendingCall);
+        if (pendingCall) {
+            clearTimeout(pendingCall.timeoutId); // Clear the timeout
+            app.locals.pendingCalls.delete(meetingId);
+            console.log('Removed from pendingCalls after cancel:', meetingId);
+        }
+
+        // Only notify participants who haven't responded yet
+        if (pendingCall) {
+            const unrespondedParticipants = pendingCall.participants.filter(
+                email => !pendingCall.respondedParticipants.has(email)
+            );
+            
+            console.log('Unresponded participants for cancel:', unrespondedParticipants);
+            console.log('All participants:', pendingCall.participants);
+            console.log('Responded participants:', Array.from(pendingCall.respondedParticipants));
+            
+            unrespondedParticipants.forEach(email => {
+                const participantSocket = app.locals.connections.get(email);
+                if (participantSocket) {
+                    console.log('Sending cancel event to participant:', email);
+                    participantSocket.emit('call:cancelled', {
+                        meetingId,
+                        hostEmail,
+                        reason: 'Call cancelled by host'
+                    });
+                }
+            });
+        }
+
         // End meeting via API call
         const response = await fetch(`http://localhost:3001/api/meetings/${meetingId}/action`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ type: 'end', hostEmail })
         });
-        
-        if (response.ok) {
-            // Notify all participants
-            socket.broadcast.emit('call:ended', { meetingId });
+
+        if (!response.ok) {
+            console.error('Failed to end meeting via API on cancel');
         }
     } catch (error) {
-        console.error('Error handling call end:', error);
+        console.error('Error handling call cancel:', error);
     }
 }
 

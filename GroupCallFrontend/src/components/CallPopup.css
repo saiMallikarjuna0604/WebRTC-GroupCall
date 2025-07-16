@@ -1,0 +1,533 @@
+/* Call Popup Styles */
+.call-popup-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(10px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.3s ease-out;
+}
+
+/* Z-index layering for different popup types */
+.call-popup-overlay .call-status-popup {
+  z-index: 1001;
+}
+
+.call-popup-overlay .outgoing-call {
+  z-index: 1002;
+}
+
+.call-popup-overlay .incoming-call {
+  z-index: 1003;
+}
+
+.call-popup {
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(20px);
+  border-radius: 20px;
+  padding: 2rem;
+  max-width: 400px;
+  width: 90%;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  animation: slideIn 0.3s ease-out;
+}
+
+/* Compact styling for outgoing call popup */
+.call-popup.outgoing-call {
+  max-height: 450px;
+  max-width: 350px;
+  padding: 1.5rem;
+}
+
+.call-popup.outgoing-call .call-popup-header {
+  margin-bottom: 1rem;
+}
+
+.call-popup.outgoing-call .call-title {
+  margin-bottom: 1rem;
+}
+
+.call-popup.outgoing-call .call-title h2 {
+  font-size: 1.3rem;
+  margin-bottom: 0.25rem;
+}
+
+.call-popup.outgoing-call .call-status {
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+}
+
+.call-popup-header {
+  margin-bottom: 1.5rem;
+}
+
+.caller-info {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.caller-avatar {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: linear-gradient(45deg, #667eea, #764ba2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  font-weight: bold;
+  color: white;
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+}
+
+.caller-avatar.ringing {
+  animation: ring 1.5s ease-in-out infinite;
+}
+
+.caller-details {
+  flex: 1;
+}
+
+.caller-name {
+  font-size: 1.3rem;
+  font-weight: 600;
+  margin: 0 0 0.25rem 0;
+  background: linear-gradient(45deg, #302f2f, #85878b);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.caller-email {
+  font-size: 0.9rem;
+  color: #666;
+  margin: 0;
+}
+
+/* Inline status display for outgoing call popup */
+.inline-status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  background: rgba(76, 175, 80, 0.1);
+  border-radius: 6px;
+  border: 1px solid rgba(76, 175, 80, 0.2);
+}
+
+.inline-status .status-icon {
+  font-size: 0.9rem;
+}
+
+.inline-status .status-text {
+  font-size: 0.8rem;
+  color: #4CAF50;
+  font-weight: 500;
+}
+
+/* Status-specific inline status styling */
+.inline-status.status-error {
+  background: rgba(244, 67, 54, 0.1);
+  border-color: rgba(244, 67, 54, 0.2);
+}
+
+.inline-status.status-error .status-text {
+  color: #f44336;
+}
+
+.inline-status.status-info {
+  background: rgba(33, 150, 243, 0.1);
+  border-color: rgba(33, 150, 243, 0.2);
+}
+
+.inline-status.status-info .status-text {
+  color: #2196F3;
+}
+
+.call-popup-content {
+  text-align: center;
+}
+
+.call-title h2 {
+  font-size: 1.5rem;
+  margin: 0 0 0.5rem 0;
+  background: linear-gradient(45deg, #302f2f, #85878b);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.call-status {
+  font-size: 1rem;
+  color: #666;
+  margin: 0 0 1.5rem 0;
+}
+
+.call-actions {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.call-action-btn {
+  padding: 0.8rem 1.5rem;
+  border-radius: 12px;
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  border: none;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 120px;
+  justify-content: center;
+}
+
+.accept-btn {
+  background: linear-gradient(45deg, #4CAF50, #45a049);
+  color: white;
+  box-shadow: 0 4px 15px rgba(76, 175, 80, 0.4);
+}
+
+.accept-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(76, 175, 80, 0.6);
+}
+
+.decline-btn {
+  background: linear-gradient(45deg, #f44336, #d32f2f);
+  color: white;
+  box-shadow: 0 4px 15px rgba(244, 67, 54, 0.4);
+}
+
+.decline-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(244, 67, 54, 0.6);
+}
+
+.cancel-btn {
+  background: linear-gradient(45deg, #ff9800, #f57c00);
+  color: white;
+  box-shadow: 0 4px 15px rgba(255, 152, 0, 0.4);
+}
+
+.cancel-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(255, 152, 0, 0.6);
+}
+
+.close-btn {
+  background: linear-gradient(45deg, #9e9e9e, #757575);
+  color: white;
+  box-shadow: 0 4px 15px rgba(158, 158, 158, 0.4);
+}
+
+.close-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(158, 158, 158, 0.6);
+}
+
+.btn-icon {
+  font-size: 1.2rem;
+}
+
+.btn-text {
+  font-weight: 500;
+}
+
+/* Participants List Styles */
+.participants-list {
+  margin: 1.5rem 0;
+  text-align: left;
+}
+
+/* Compact participants list for outgoing call */
+.outgoing-call .participants-list {
+  margin: 1rem 0;
+  max-height: 180px;
+  overflow-y: auto;
+  border-radius: 10px;
+  background: white;
+  padding: 0.5rem;
+}
+
+.outgoing-call .participants-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.outgoing-call .participants-list::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 3px;
+}
+
+.outgoing-call .participants-list::-webkit-scrollbar-thumb {
+  background: rgba(102, 126, 234, 0.5);
+  border-radius: 3px;
+}
+
+.outgoing-call .participants-list::-webkit-scrollbar-thumb:hover {
+  background: rgba(102, 126, 234, 0.7);
+}
+
+.participants-list h4 {
+  font-size: 1rem;
+  margin: 0 0 1rem 0;
+  color: #333;
+  text-align: center;
+}
+
+.outgoing-call .participants-list h4 {
+  font-size: 0.9rem;
+  margin: 0 0 0.75rem 0;
+}
+
+.participant-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  background: rgba(255, 255, 255, 0.5);
+  border-radius: 10px;
+  margin-bottom: 0.5rem;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+/* Compact participant items for outgoing call */
+.outgoing-call .participant-item {
+  padding: 0.5rem;
+  margin-bottom: 0.25rem;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.participant-avatar {
+  width: 35px;
+  height: 35px;
+  border-radius: 50%;
+  background: linear-gradient(45deg, #667eea, #764ba2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.9rem;
+  font-weight: bold;
+  color: white;
+  flex-shrink: 0;
+}
+
+/* Compact participant avatars for outgoing call */
+.outgoing-call .participant-avatar {
+  width: 28px;
+  height: 28px;
+  font-size: 0.8rem;
+}
+
+.participant-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.participant-name {
+  display: block;
+  font-weight: 500;
+  color: #333;
+  font-size: 0.9rem;
+}
+
+/* Compact participant info for outgoing call */
+.outgoing-call .participant-name {
+  font-size: 0.85rem;
+}
+
+.participant-email {
+  display: block;
+  font-size: 0.8rem;
+  color: #666;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Compact participant email for outgoing call */
+.outgoing-call .participant-email {
+  font-size: 0.75rem;
+}
+
+.participant-status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.status-icon {
+  font-size: 1rem;
+}
+
+.status-text {
+  font-size: 0.8rem;
+  color: #666;
+  white-space: nowrap;
+}
+
+/* Status-specific styling for participant items */
+.participant-item.status-answered {
+  background: rgba(76, 175, 80, 0.1);
+  border-color: rgba(76, 175, 80, 0.3);
+}
+
+.participant-item.status-declined {
+  background: rgba(244, 67, 54, 0.1);
+  border-color: rgba(244, 67, 54, 0.3);
+}
+
+.participant-item.status-timeout {
+  background: rgba(255, 152, 0, 0.1);
+  border-color: rgba(255, 152, 0, 0.3);
+}
+
+.participant-item.status-ringing {
+  background: rgba(102, 126, 234, 0.1);
+  border-color: rgba(102, 126, 234, 0.3);
+}
+
+/* Status text colors */
+.participant-item.status-answered .status-text {
+  color: #4CAF50;
+  font-weight: 500;
+}
+
+.participant-item.status-declined .status-text {
+  color: #f44336;
+  font-weight: 500;
+}
+
+.participant-item.status-timeout .status-text {
+  color: #ff9800;
+  font-weight: 500;
+}
+
+.participant-item.status-ringing .status-text {
+  color: #667eea;
+  font-weight: 500;
+}
+
+/* Animation for status changes */
+.participant-item {
+  transition: all 0.3s ease;
+}
+
+.participant-item:hover {
+  transform: translateX(2px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* Status Popup Variants */
+.call-status-popup.status-declined .caller-avatar {
+  background: linear-gradient(45deg, #f44336, #d32f2f);
+}
+
+.call-status-popup.status-ended .caller-avatar {
+  background: linear-gradient(45deg, #9e9e9e, #757575);
+}
+
+.call-status-popup.status-timeout .caller-avatar {
+  background: linear-gradient(45deg, #ff9800, #f57c00);
+}
+
+.call-status-popup.status-error .caller-avatar {
+  background: linear-gradient(45deg, #f44336, #d32f2f);
+}
+
+.call-status-popup.status-success .caller-avatar {
+  background: linear-gradient(45deg, #4CAF50, #45a049);
+}
+
+.call-status-popup.status-info .caller-avatar {
+  background: linear-gradient(45deg, #2196F3, #1976D2);
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateY(-20px) scale(0.95);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes ring {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+  }
+  50% {
+    transform: scale(1.1);
+    box-shadow: 0 6px 25px rgba(102, 126, 234, 0.6);
+  }
+}
+
+/* Responsive Design */
+@media (max-width: 480px) {
+  .call-popup {
+    padding: 1.5rem;
+    margin: 1rem;
+  }
+
+  .caller-avatar {
+    width: 50px;
+    height: 50px;
+    font-size: 1.2rem;
+  }
+
+  .call-title h2 {
+    font-size: 1.3rem;
+  }
+
+  .call-actions {
+    flex-direction: column;
+  }
+
+  .call-action-btn {
+    width: 100%;
+  }
+
+  .participant-item {
+    padding: 0.5rem;
+  }
+
+  .participant-avatar {
+    width: 30px;
+    height: 30px;
+    font-size: 0.8rem;
+  }
+}
+
+/* Accessibility */
+.call-action-btn:focus {
+  outline: 2px solid #667eea;
+  outline-offset: 2px;
+}
+
+.call-popup-overlay:focus-within {
+  outline: none;
+} 

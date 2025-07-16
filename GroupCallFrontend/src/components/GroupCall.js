@@ -377,6 +377,52 @@ const GroupCall = ({ user, onLeave, meetingId, socket }) => {
         }
     };
 
+    const endCall = async () => {
+        try {
+            // Close all producers
+            for (const producer of producers.values()) {
+                producer.close();
+            }
+            
+            // Close all consumers
+            for (const consumer of consumers.values()) {
+                consumer.close();
+            }
+            
+            // Close transports
+            if (sendTransport) sendTransport.close();
+            if (recvTransport) recvTransport.close();
+            
+            // Stop local stream
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+            }
+            
+            // End call for all participants via socket
+            if (activeRoom && socketRef.current) {
+                socketRef.current.emit('call:end', {
+                    meetingId: activeRoom,
+                    hostEmail: user.email
+                });
+            }
+            
+            // Reset state
+            setLocalStream(null);
+            setRemoteStreams(new Map());
+            setProducers(new Map());
+            setConsumers(new Map());
+            setSendTransport(null);
+            setRecvTransport(null);
+            setDevice(null);
+            setActiveRoom(null);
+            
+            onLeave();
+        } catch (error) {
+            console.error('Error ending call:', error);
+            onLeave();
+        }
+    };
+
     return (
         <div className="group-call-container">
             {!activeRoom ? (
@@ -448,6 +494,9 @@ const GroupCall = ({ user, onLeave, meetingId, socket }) => {
                         </button>
                         <button onClick={leaveRoom} className="leave-btn">
                             ❌ Leave Room
+                        </button>
+                        <button onClick={endCall} className="end-call-btn">
+                            🚫 End Call
                         </button>
                     </div>
                     <div className="participants-list">

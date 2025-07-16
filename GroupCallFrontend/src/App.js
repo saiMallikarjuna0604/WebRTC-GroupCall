@@ -5,6 +5,9 @@ import './App.css';
 import GroupCall from './components/GroupCall';
 import Popover from './components/Popover';
 import GroupsListPopover from './components/GroupsListPopover';
+import IncomingCallPopup from './components/IncomingCallPopup';
+import OutgoingCallPopup from './components/OutgoingCallPopup';
+import CallStatusPopup from './components/CallStatusPopup';
 
 function App() {
   const [email, setEmail] = useState('');
@@ -17,6 +20,12 @@ function App() {
   const [popoverType, setPopoverType] = useState(null);
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const [pendingInvites, setPendingInvites] = useState([]);
+
+  // Call notification state management
+  const [incomingCall, setIncomingCall] = useState(null);
+  const [outgoingCall, setOutgoingCall] = useState(null);
+  const [callStatus, setCallStatus] = useState(null);
+  const [showTimeoutMessage, setShowTimeoutMessage] = useState(false);
 
   const groupsPopoverRef = useRef(null);
 
@@ -94,35 +103,94 @@ function App() {
       // Call invitation handling
       socketRef.current.on('call:invite', (data) => {
         const { meetingId, host, title } = data;
-        const shouldAccept = window.confirm(`${host} is inviting you to join: ${title}. Accept?`);
-        
-        if (shouldAccept) {
-          socketRef.current.emit('call:accept', {
-            meetingId,
-            email: email
-          });
-          setActiveRoom(meetingId);
-        } else {
-          socketRef.current.emit('call:decline', {
-            meetingId,
-            email: email,
-            hostEmail: host
-          });
-        }
+        setIncomingCall({ meetingId, host, title });
+      });
+
+      socketRef.current.on('call:declined', (data) => {
+        const { meetingId, email } = data;
+        // Don't dismiss outgoing call popup, just show status update
+        setCallStatus({
+          type: 'info',
+          title: 'Participant Declined',
+          message: `${email} declined the call`
+        });
+        // Keep outgoingCall state active for other participants
       });
 
       socketRef.current.on('call:ended', (data) => {
         const { meetingId } = data;
+        
+        // Dismiss incoming call popup if active for this meeting
+        if (incomingCall && incomingCall.meetingId === meetingId) {
+          setIncomingCall(null);
+        }
+        
+        // Handle active room if user is in the call
         if (activeRoom === meetingId) {
           setActiveRoom(null);
-          alert('Call has ended');
+          setCallStatus({
+            type: 'ended',
+            title: 'Call Ended',
+            message: 'The call has ended'
+          });
         }
       });
 
-      socketRef.current.on('disconnect', () => {
-        console.log('Disconnected from server');
-        socketRef.current = null;
+      socketRef.current.on('call:timeout', (data) => {
+        const { meetingId } = data;
+        
+        console.log('call:timeout****', data, 'incomingCall', incomingCall, 'outgoingCall', outgoingCall);
+        
+        // Check if this timeout is relevant to the current user
+        // const isRelevantTimeout = (
+        //   (incomingCall && incomingCall.meetingId === meetingId) ||
+        //   (outgoingCall && outgoingCall.meetingId === meetingId)
+        // );
+        
+        // if (!isRelevantTimeout) {
+        //   console.log('Timeout event not relevant to current user, ignoring');
+        //   return;
+        // }
+        
+        // Show timeout message immediately
+        setShowTimeoutMessage(true);
+        
+        // Close popups after showing message for 2 seconds
+        setTimeout(() => {
+          setIncomingCall(null);
+          setOutgoingCall(null);
+          setShowTimeoutMessage(false);
+        }, 2000);
+        
+        // Show timeout status message
+        setCallStatus({
+          type: 'timeout',
+          title: 'Call Timeout',
+          message: 'No one answered the call within 40 seconds'
+        });
       });
+
+      socketRef.current.on('call:cancelled', (data) => {
+        const { meetingId, hostEmail, reason } = data;
+        
+        console.log('Call cancelled:', data, 'incomingCall', incomingCall, 'callStatus', callStatus);
+        
+        // Always close popups regardless of current state
+        setIncomingCall(null);
+        setOutgoingCall(null);
+        
+        // Show cancellation notification
+        setCallStatus({
+          type: 'info',
+          title: 'Call Cancelled',
+          message: reason || 'The call was cancelled by the host'
+        });
+      });
+
+      // socketRef.current.on('disconnect', () => {
+      //   console.log('Disconnected from server');
+      //   socketRef.current = null;
+      // });
     }
 
     return () => {
@@ -170,6 +238,10 @@ function App() {
     setActiveRoom(null);
     setOnlineUsers([]);
     setPendingInvites([]);
+    // Clear call states
+    setIncomingCall(null);
+    setOutgoingCall(null);
+    setCallStatus(null);
   };
 
   const fetchPendingInvites = async () => {
@@ -189,6 +261,54 @@ function App() {
 
   const handleLeave = () => {
     setActiveRoom(null);
+  };
+
+  // Call popup handlers
+  const handleIncomingCallAccept = () => {
+    if (incomingCall) {
+      socketRef.current.emit('call:accept', {
+        meetingId: incomingCall.meetingId,
+        email: email
+      });
+      setActiveRoom(incomingCall.meetingId);
+      setIncomingCall(null);
+      setShowTimeoutMessage(false);
+    }
+  };
+
+  const handleIncomingCallDecline = () => {
+    if (incomingCall) {
+      socketRef.current.emit('call:decline', {
+        meetingId: incomingCall.meetingId,
+        email: email,
+        hostEmail: incomingCall.host
+      });
+      setIncomingCall(null);
+      setShowTimeoutMessage(false);
+    }
+  };
+
+  const handleIncomingCallTimeout = () => {
+    // This function is called by the IncomingCallPopup after showing the timeout message
+    setIncomingCall(null);
+    setShowTimeoutMessage(false);
+  };
+
+  const handleOutgoingCallCancel = () => {
+    if (outgoingCall) {
+      socketRef.current.emit('call:cancel', {
+        meetingId: outgoingCall.meetingId,
+        hostEmail: email
+      });
+      setOutgoingCall(null);
+      setIncomingCall(null);
+      setActiveRoom(null);
+      setShowTimeoutMessage(false);
+    }
+  };
+
+  const handleCallStatusClose = () => {
+    setCallStatus(null);
   };
 
   // Popover action handlers
@@ -216,7 +336,11 @@ function App() {
           }
           
           if (participants.length === 0) {
-            alert('No participants available for the call.');
+            setCallStatus({
+              type: 'error',
+              title: 'No Participants',
+              message: 'No participants available for the call.'
+            });
             return;
           }
           
@@ -237,19 +361,31 @@ function App() {
           }
           
           const result = await response.json();
-          setActiveRoom(result.meeting.meetingId);
+          
+          // Show outgoing call popup
+          setOutgoingCall({
+            meetingId: result.meeting.meetingId,
+            participants: participants,
+            title: title
+          });
           
           // Send call invitations
           socketRef.current.emit('call:initiate', {
             hostEmail: email,
             participants: participants,
-            title: title
+            title: title,
+            meetingId: result.meeting.meetingId
           });
           
-          alert('Call started successfully!');
+          // Don't show separate status popup - integrated into outgoing call popup
         } catch (error) {
           console.error('Error starting call:', error);
-          alert(`Failed to start call: ${error.message}`);
+          // Show error status popup for call initiation errors
+          setCallStatus({
+            type: 'error',
+            title: 'Call Failed',
+            message: `Failed to start call: ${error.message}`
+          });
         }
         break;
         
@@ -274,10 +410,18 @@ function App() {
           
           const result = await response.json();
           console.log('Group created successfully:', result);
-          alert('Group created successfully!');
+          setCallStatus({
+            type: 'success',
+            title: 'Group Created',
+            message: 'Group created successfully!'
+          });
         } catch (error) {
           console.error('Error creating group:', error);
-          alert(`Error creating group: ${error.message}`);
+          setCallStatus({
+            type: 'error',
+            title: 'Group Creation Failed',
+            message: `Error creating group: ${error.message}`
+          });
         }
         break;
       default:
@@ -430,6 +574,34 @@ function App() {
         currentUserEmail={email}
         socket={socketRef.current}
       />
+
+      {/* Call Popup Components */}
+      {incomingCall && (
+        <IncomingCallPopup
+          call={incomingCall}
+          onAccept={handleIncomingCallAccept}
+          onDecline={handleIncomingCallDecline}
+          onTimeout={handleIncomingCallTimeout}
+          showTimeoutMessage={showTimeoutMessage}
+        />
+      )}
+
+      {outgoingCall && (
+        <OutgoingCallPopup
+          call={outgoingCall}
+          onCancel={handleOutgoingCallCancel}
+          socket={socketRef.current}
+          showTimeoutMessage={showTimeoutMessage}
+          setOutgoingCall={setOutgoingCall}
+        />
+      )}
+
+      {callStatus && (
+        <CallStatusPopup
+          status={callStatus}
+          onClose={handleCallStatusClose}
+        />
+      )}
     </div>
   );
 }

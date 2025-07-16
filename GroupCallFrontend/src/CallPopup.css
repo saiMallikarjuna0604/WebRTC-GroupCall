@@ -1,0 +1,98 @@
+/* Countdown Timer Styles */
+.countdown-timer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  color: black !important;
+}
+
+.timer-label {
+  font-size: 0.875rem;
+  color: #666;
+  font-weight: 500;
+}
+
+.timer-value {
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: #2563eb;
+  min-width: 40px;
+  text-align: center;
+  padding: 4px 8px;
+  background: rgba(37, 99, 235, 0.1);
+  border-radius: 6px;
+  border: 1px solid rgba(37, 99, 235, 0.2);
+  transition: all 0.3s ease;
+}
+
+.timer-value.urgent {
+  color: #dc2626;
+  background: rgba(220, 38, 38, 0.1);
+  border-color: rgba(220, 38, 38, 0.2);
+  animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+  100% {
+    transform: scale(1);
+  }
+} 
+
+/* Timeout Message Styles */
+.timeout-message {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 40px 20px;
+  min-height: 200px;
+}
+
+.timeout-icon {
+  font-size: 3rem;
+  margin-bottom: 16px;
+  animation: pulse 1s infinite;
+}
+
+.timeout-message h3 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #dc2626;
+  margin-bottom: 12px;
+}
+
+.timeout-message p {
+  font-size: 1rem;
+  color: #666;
+  margin-bottom: 20px;
+  line-height: 1.5;
+}
+
+.timeout-countdown {
+  font-size: 0.875rem;
+  color: #999;
+  font-style: italic;
+  animation: fadeInOut 2s infinite;
+}
+
+@keyframes fadeInOut {
+  0%, 100% {
+    opacity: 0.6;
+  }
+  50% {
+    opacity: 1;
+  }
+} 
