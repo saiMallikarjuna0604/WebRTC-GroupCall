@@ -13,6 +13,7 @@ const GroupCall = ({ user, onLeave, meetingId, socket, isHost = false }) => {
     const [error, setError] = useState(null);
 
     console.log(remoteStreams)
+    console.log(localStream,'localStream')
 
     // MediaSoup objects (not state-driven)
     const deviceRef = useRef(null);
@@ -22,9 +23,19 @@ const GroupCall = ({ user, onLeave, meetingId, socket, isHost = false }) => {
     const consumersRef = useRef(new Map());
     const localVideoRef = useRef(null);
     const isCleaningUpRef = useRef(false);
+    const hasStartedCallRef = useRef(false);
+    const eventListenersAddedRef = useRef(false);
 
     // Sequential call process function
     const joinCallProcess = async () => {
+        // Prevent duplicate call processes
+        if (hasStartedCallRef.current) {
+            console.log('Call process already started, skipping...');
+            return;
+        }
+        
+        hasStartedCallRef.current = true;
+        
         try {
             setError(null);
             
@@ -41,6 +52,7 @@ const GroupCall = ({ user, onLeave, meetingId, socket, isHost = false }) => {
             if (localVideoRef.current) {
                 localVideoRef.current.srcObject = stream;
                 localVideoRef.current.muted = true;
+                localVideoRef.current.play().catch(e => console.log('Local video play failed:', e));
             }
             
             // Step 2: Get Router RTP Capabilities
@@ -182,25 +194,21 @@ const GroupCall = ({ user, onLeave, meetingId, socket, isHost = false }) => {
             
             recvTransportRef.current = recvTransport;
             
-            // Step 8: Create Producers (Audio and Video) - ONLY FOR HOST
-            // if (isHost) {
-                console.log('Step 8: Creating producers...');
-                const audioTrack = stream.getAudioTracks()[0];
-                if (audioTrack) {
-                    const audioProducer = await sendTransport.produce({ track: audioTrack });
-                    producersRef.current.set('audio', audioProducer);
-                    console.log('Audio producer created');
-                }
-                
-                const videoTrack = stream.getVideoTracks()[0];
-                if (videoTrack) {
-                    const videoProducer = await sendTransport.produce({ track: videoTrack });
-                    producersRef.current.set('video', videoProducer);
-                    console.log('Video producer created');
-                }
-            // } else {
-            //     console.log('Step 8: Skipping producer creation (participant)');
-            // }
+            // Step 8: Create Producers (Audio and Video) - FOR ALL USERS
+            console.log('Step 8: Creating producers...');
+            const audioTrack = stream.getAudioTracks()[0];
+            if (audioTrack) {
+                const audioProducer = await sendTransport.produce({ track: audioTrack });
+                producersRef.current.set('audio', audioProducer);
+                console.log('Audio producer created');
+            }
+            
+            const videoTrack = stream.getVideoTracks()[0];
+            if (videoTrack) {
+                const videoProducer = await sendTransport.produce({ track: videoTrack });
+                producersRef.current.set('video', videoProducer);
+                console.log('Video producer created');
+            }
             
             // Step 9: Join meeting via API
             console.log('Step 9: Joining meeting via API...');
@@ -224,6 +232,9 @@ const GroupCall = ({ user, onLeave, meetingId, socket, isHost = false }) => {
             console.error('Error occurred at step:', /* add step tracking */);
             setError(error.message);
             
+            // Reset the flag on error so cleanup can work properly
+            hasStartedCallRef.current = false;
+            
             // Don't call cleanup immediately - let the error be displayed
             // await cleanupCall();  // Comment this out temporarily
         }
@@ -231,7 +242,8 @@ const GroupCall = ({ user, onLeave, meetingId, socket, isHost = false }) => {
 
     // Setup event listeners for incoming producers
     useEffect(() => {
-        if (!socket) return;
+        if (!socket || eventListenersAddedRef.current) return;
+        eventListenersAddedRef.current = true;
 
         const handleProducerCreated = async (data) => {
             try {
@@ -309,6 +321,8 @@ const GroupCall = ({ user, onLeave, meetingId, socket, isHost = false }) => {
             socket.off('consumer:created', handleConsumerCreated);
             socket.off('participant:joined', handleParticipantJoined);
             socket.off('participant:left', handleParticipantLeft);
+            eventListenersAddedRef.current = false;
+            // Don't reset hasStartedCallRef here - let it persist
         };
     }, [socket, meetingId, user.email]);
 
@@ -361,6 +375,8 @@ const GroupCall = ({ user, onLeave, meetingId, socket, isHost = false }) => {
             console.error('Error cleaning up call:', error);
         } finally {
             isCleaningUpRef.current = false;
+            // Reset the call flag only after cleanup is complete
+            hasStartedCallRef.current = false;
         }
     };
 
@@ -442,29 +458,31 @@ const GroupCall = ({ user, onLeave, meetingId, socket, isHost = false }) => {
 
             <div className="video-container">
                 <div className="local-video">
-                            <video
-                                ref={localVideoRef}
-                                autoPlay
-                                playsInline
-                                muted
-                            />
-                    <div className="video-label">You</div>
-                            </div>
+                    <video
+                        ref={localVideoRef}
+                        autoPlay
+                        playsInline
+                        muted
+                    />
+                    <div className="video-label">You ({user.email})</div>
+                </div>
                 
                 {Array.from(remoteStreams.values()).map(({ stream, userId, kind }, index) => (
-                    <div key={index} className="remote-video">
-                                    <video
-                                        autoPlay
-                                        playsInline
+                    <div key={`${userId}-${kind}`} className="remote-video">
+                        <video
+                            autoPlay
+                            playsInline
                             ref={(el) => {
-                                            if (el) el.srcObject = stream;
-                                        }}
-                                    />
-                        <div className="video-label">{userId}</div>
+                                if (el) {
+                                    el.srcObject = stream;
+                                    el.play().catch(e => console.log('Remote video play failed:', e));
+                                }
+                            }}
+                        />
+                        <div className="video-label">{userId} ({kind})</div>
                     </div>
                 ))}
-
-                    </div>
+            </div>
 
                     <div className="participants-list">
                 <h3>Participants ({participants.length + 1})</h3>
