@@ -331,52 +331,52 @@ function App() {
   };
 
   // Call popup handlers
-  const handleIncomingCallAccept = () => {
-    if (incomingCall) {
-      socketRef.current.emit('call:accept', {
-        meetingId: incomingCall.meetingId,
-        email: email
-      });
-      setActiveRoom(incomingCall.meetingId);
-      setIncomingCall(null);
-      setShowTimeoutMessage(false);
-    }
-  };
+  // const handleIncomingCallAccept = () => {
+  //   if (incomingCall) {
+  //     socketRef.current.emit('call:accept', {
+  //       meetingId: incomingCall.meetingId,
+  //       email: email
+  //     });
+  //     setActiveRoom(incomingCall.meetingId);
+  //     setIncomingCall(null);
+  //     setShowTimeoutMessage(false);
+  //   }
+  // };
 
-  const handleIncomingCallDecline = () => {
-    if (incomingCall) {
-      socketRef.current.emit('call:decline', {
-        meetingId: incomingCall.meetingId,
-        email: email,
-        hostEmail: incomingCall.host
-      });
-      setIncomingCall(null);
-      setShowTimeoutMessage(false);
-    }
-  };
+  // const handleIncomingCallDecline = () => {
+  //   if (incomingCall) {
+  //     socketRef.current.emit('call:decline', {
+  //       meetingId: incomingCall.meetingId,
+  //       email: email,
+  //       hostEmail: incomingCall.host
+  //     });
+  //     setIncomingCall(null);
+  //     setShowTimeoutMessage(false);
+  //   }
+  // };
 
-  const handleIncomingCallTimeout = () => {
-    // This function is called by the IncomingCallPopup after showing the timeout message
-    setIncomingCall(null);
-    setShowTimeoutMessage(false);
-  };
+  // const handleIncomingCallTimeout = () => {
+  //   // This function is called by the IncomingCallPopup after showing the timeout message
+  //   setIncomingCall(null);
+  //   setShowTimeoutMessage(false);
+  // };
 
-  const handleOutgoingCallCancel = () => {
-    if (outgoingCall) {
-      socketRef.current.emit('call:cancel', {
-        meetingId: outgoingCall.meetingId,
-        hostEmail: email
-      });
-      setOutgoingCall(null);
-      setIncomingCall(null);
-      setActiveRoom(null);
-      setShowTimeoutMessage(false);
-    }
-  };
+  // const handleOutgoingCallCancel = () => {
+  //   if (outgoingCall) {
+  //     socketRef.current.emit('call:cancel', {
+  //       meetingId: outgoingCall.meetingId,
+  //       hostEmail: email
+  //     });
+  //     setOutgoingCall(null);
+  //     setIncomingCall(null);
+  //     setActiveRoom(null);
+  //     setShowTimeoutMessage(false);
+  //   }
+  // };
 
-  const handleCallStatusClose = () => {
-    setCallStatus(null);
-  };
+  // const handleCallStatusClose = () => {
+  //   setCallStatus(null);
+  // };
 
   // Popover action handlers
   const handlePopoverAction = async (action, data) => {
