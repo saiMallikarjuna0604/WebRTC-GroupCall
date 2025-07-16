@@ -2,8 +2,9 @@ import React, { forwardRef } from 'react';
 import GroupsListPopover from './GroupsListPopover';
 import InitiateCallPopover from './InitiateCallPopover';
 import CreateGroupPopover from './CreateGroupPopover';
+import CallInvitePopover from './CallInvitePopover';
 
-const Popover = forwardRef(({ type, isOpen, onClose, data, onAction, currentUserEmail, socket }, ref) => {
+const Popover = forwardRef(({ type, isOpen, onClose, data, onAction, currentUserEmail, socket, inviteData, onAcceptInvite, onDeclineInvite }, ref) => {
   if (!isOpen) return null;
 
   const renderContent = () => {
@@ -14,6 +15,8 @@ const Popover = forwardRef(({ type, isOpen, onClose, data, onAction, currentUser
         return <InitiateCallPopover data={data} onClose={onClose} onAction={onAction} currentUserEmail={currentUserEmail} />;
       case 'create':
         return <CreateGroupPopover data={data} onClose={onClose} onAction={onAction} currentUserEmail={currentUserEmail} />;
+      case 'call-invite':
+        return <CallInvitePopover inviteData={inviteData} onAccept={onAcceptInvite} onDecline={onDeclineInvite} onClose={onClose} />;
       default:
         return null;
     }

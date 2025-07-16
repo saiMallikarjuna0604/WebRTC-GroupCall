@@ -27,8 +27,8 @@ const InitiateCallPopover = ({ data, onClose, onAction, currentUserEmail }) => {
     }
     
     // Pass the selected users array to the parent component
-    onAction('start-call', selectedUsers);
-    onClose();
+      onAction('start-call', selectedUsers);
+      onClose();
   };
 
   const isUserSelected = (user) => {

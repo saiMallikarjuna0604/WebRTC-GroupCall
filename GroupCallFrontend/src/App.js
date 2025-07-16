@@ -14,6 +14,7 @@ function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [onlineUsers, setOnlineUsers] = useState([]);
   const [activeRoom, setActiveRoom] = useState(null);
+  const [isHost, setIsHost] = useState(false);
   const socketRef = useRef(null);
 
   // Popover state management
@@ -29,7 +30,7 @@ function App() {
 
   const groupsPopoverRef = useRef(null);
 
-  // Initialize Socket.IO connection
+  // Initialize Socket.IO connection - SINGLE SOCKET INSTANCE
   useEffect(() => {
     if (isLoggedIn && !socketRef.current) {
       socketRef.current = io('http://localhost:3001');
@@ -261,6 +262,72 @@ function App() {
 
   const handleLeave = () => {
     setActiveRoom(null);
+   setIsHost(false);
+  };
+
+  const handleAcceptInvite = (meetingId) => {
+    socketRef.current.emit('call:accept', {
+      meetingId,
+      email: email
+    });
+    setActiveRoom(meetingId);
+    setIsHost(false); // User is a participant, not host
+  };
+
+  const handleDeclineInvite = (meetingId, host) => {
+    socketRef.current.emit('call:decline', {
+      meetingId,
+      email: email,
+      hostEmail: host
+    });
+  };
+
+  // Call popup handlers
+  const handleIncomingCallAccept = () => {
+    if (incomingCall) {
+      socketRef.current.emit('call:accept', {
+        meetingId: incomingCall.meetingId,
+        email: email
+      });
+      setActiveRoom(incomingCall.meetingId);
+      setIncomingCall(null);
+      setShowTimeoutMessage(false);
+    }
+  };
+
+  const handleIncomingCallDecline = () => {
+    if (incomingCall) {
+      socketRef.current.emit('call:decline', {
+        meetingId: incomingCall.meetingId,
+        email: email,
+        hostEmail: incomingCall.host
+      });
+      setIncomingCall(null);
+      setShowTimeoutMessage(false);
+    }
+  };
+
+  const handleIncomingCallTimeout = () => {
+    // This function is called by the IncomingCallPopup after showing the timeout message
+    setIncomingCall(null);
+    setShowTimeoutMessage(false);
+  };
+
+  const handleOutgoingCallCancel = () => {
+    if (outgoingCall) {
+      socketRef.current.emit('call:cancel', {
+        meetingId: outgoingCall.meetingId,
+        hostEmail: email
+      });
+      setOutgoingCall(null);
+      setIncomingCall(null);
+      setActiveRoom(null);
+      setShowTimeoutMessage(false);
+    }
+  };
+
+  const handleCallStatusClose = () => {
+    setCallStatus(null);
   };
 
   // Call popup handlers
@@ -343,6 +410,8 @@ function App() {
             });
             return;
           }
+
+          console.log(participants,'-----participants-----');
           
           // Create meeting
           const response = await fetch('http://localhost:3001/api/meetings/create', {
@@ -560,6 +629,7 @@ function App() {
           onLeave={handleLeave}
           meetingId={activeRoom}
           socket={socketRef.current}
+          isHost={isHost}
         />
       )}
       
@@ -573,6 +643,7 @@ function App() {
         onAction={handlePopoverAction}
         currentUserEmail={email}
         socket={socketRef.current}
+
       />
 
       {/* Call Popup Components */}

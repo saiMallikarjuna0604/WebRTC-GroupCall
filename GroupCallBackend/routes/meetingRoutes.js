@@ -142,9 +142,11 @@ async function connectTransport(meetingId, transportId, dtlsParameters) {
   if (!room) throw new Error('Room not found: ' + meetingId);
 
   const transport = room.transports.get(transportId);
+  console.log('Transport found:', transport);
   if (!transport) throw new Error('Transport not found: ' + transportId);
 
-  await transport.connect({ dtlsParameters });
+ const result =  await transport.connect({ dtlsParameters });
+ console.log('Transport connected:', result);
 }
 
 async function createProducer(meetingId, email, transportId, kind, rtpParameters) {
@@ -166,12 +168,13 @@ async function createProducer(meetingId, email, transportId, kind, rtpParameters
       otherParticipant.socket.emit('producer:created', {
         producerId: producer.id,
         kind,
-        email
+        email,
+        rtpParameters: producer.rtpParameters
       });
     }
   });
 
-  return { producerId: producer.id };
+  return { producerId: producer.id,kind,email,rtpParameters: producer.rtpParameters};
 }
 
 async function createConsumer(meetingId, email, transportId, producerId, rtpCapabilities) {
@@ -290,6 +293,9 @@ router.post('/create', async (req, res) => {
       title: title || 'Group Call',
       description: description || ''
     });
+
+    // Add host to MediaSoup room so they can create transports
+    await addParticipantToRoom(meetingId, hostEmail, req.app.locals.connections);
 
     // Save analytics
     await saveMeetingAnalytics(meeting);

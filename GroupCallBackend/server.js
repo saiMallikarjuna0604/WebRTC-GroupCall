@@ -154,6 +154,7 @@ io.on('connection', async (socket) => {
             console.log('Transport create received:', data);
             const { meetingId, direction, email } = data;
             const transportInfo = await createTransport(meetingId, email, direction);
+            console.log('Transport created:', transportInfo);
             socket.emit('transport:created', transportInfo);
         } catch (error) {
             console.error('Transport create error:', error);
@@ -178,7 +179,8 @@ io.on('connection', async (socket) => {
             console.log('Producer create received:', data);
             const { meetingId, email, transportId, kind, rtpParameters } = data;
             const result = await createProducer(meetingId, email, transportId, kind, rtpParameters);
-            socket.emit('producer:created', result);
+            console.log('Producer created:', result);
+            // socket.emit('producer:created', result);
         } catch (error) {
             console.error('Producer create error:', error);
             socket.emit('error', { message: 'Failed to create producer' });

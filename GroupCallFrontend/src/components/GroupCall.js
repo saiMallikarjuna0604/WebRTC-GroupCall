@@ -1,150 +1,274 @@
 /* eslint-disable default-case */
 import React, { useEffect, useRef, useState } from 'react';
-import { io } from 'socket.io-client';
 import { Device } from 'mediasoup-client';
 import './GroupCall.css';
 
-const GroupCall = ({ user, onLeave, meetingId, socket }) => {
+const GroupCall = ({ user, onLeave, meetingId, socket, isHost = false }) => {
+    // Only essential UI states - no socket-driven states
     const [localStream, setLocalStream] = useState(null);
     const [remoteStreams, setRemoteStreams] = useState(new Map());
-    const [isConnected, setIsConnected] = useState(false);
     const [participants, setParticipants] = useState([]);
     const [isMuted, setIsMuted] = useState(false);
     const [isVideoOff, setIsVideoOff] = useState(false);
-    const [activeRoom, setActiveRoom] = useState(meetingId);
-    const [availableRooms, setAvailableRooms] = useState([]);
+    const [error, setError] = useState(null);
 
-    // MediaSoup state
-    const [device, setDevice] = useState(null);
-    const [sendTransport, setSendTransport] = useState(null);
-    const [recvTransport, setRecvTransport] = useState(null);
-    const [producers, setProducers] = useState(new Map());
-    const [consumers, setConsumers] = useState(new Map());
-    const [routerRtpCapabilities, setRouterRtpCapabilities] = useState(null);
+    console.log(remoteStreams)
 
-    const socketRef = useRef(socket);
+    // MediaSoup objects (not state-driven)
+    const deviceRef = useRef(null);
+    const sendTransportRef = useRef(null);
+    const recvTransportRef = useRef(null);
+    const producersRef = useRef(new Map());
+    const consumersRef = useRef(new Map());
     const localVideoRef = useRef(null);
+    const isCleaningUpRef = useRef(false);
 
-    // Initialize Socket.IO connection and MediaSoup events
-    useEffect(() => {
-        if (!socketRef.current) {
-            socketRef.current = io('http://localhost:3001');
-        }
-        
-        socketRef.current.on('connect', () => {
-            console.log('Connected to SFU server');
-            setIsConnected(true);
+    // Sequential call process function
+    const joinCallProcess = async () => {
+        try {
+            setError(null);
             
-            // Register user
-            socketRef.current.emit('register', {
-                email: user.email
+            console.log('Starting sequential call process...');
+            
+            // Step 1: Get user media
+            console.log('Step 1: Getting user media...');
+            const stream = await navigator.mediaDevices.getUserMedia({
+                audio: true,
+                video: true
             });
-        });
-
-        socketRef.current.on('disconnect', () => {
-            console.log('Disconnected from SFU server');
-            setIsConnected(false);
-        });
-
-        // MediaSoup events
-        socketRef.current.on('router:rtpCapabilities', async (data) => {
-            try {
-                const { rtpCapabilities } = data;
-                setRouterRtpCapabilities(rtpCapabilities);
-                
-                if (device) {
-                    await device.load({ routerRtpCapabilities: rtpCapabilities });
-                    console.log('Device loaded with router RTP capabilities');
-                }
-            } catch (error) {
-                console.error('Error loading device:', error);
+            setLocalStream(stream);
+            
+            if (localVideoRef.current) {
+                localVideoRef.current.srcObject = stream;
+                localVideoRef.current.muted = true;
             }
-        });
-
-        socketRef.current.on('transport:created', async (data) => {
-            try {
-                const { id, iceParameters, iceCandidates, dtlsParameters, direction } = data;
+            
+            // Step 2: Get Router RTP Capabilities
+            console.log('Step 2: Getting router RTP capabilities...');
+            const rtpCapabilities = await new Promise((resolve, reject) => {
+                const timeout = setTimeout(() => reject(new Error('RTP capabilities timeout')), 10000);
                 
-                if (direction === 'send') {
-                    const transport = device.createSendTransport({
-                        id,
-                        iceParameters,
-                        iceCandidates,
-                        dtlsParameters
-                    });
-                    
-                    transport.on('connect', ({ dtlsParameters }, callback, errback) => {
-                        socketRef.current.emit('transport:connect', {
-                            meetingId: activeRoom,
-                            transportId: transport.id,
-                            dtlsParameters
+                socket.emit('router:rtpCapabilities', { meetingId });
+                
+                socket.once('router:rtpCapabilities', (data) => {
+                    clearTimeout(timeout);
+                    resolve(data.rtpCapabilities);
+                });
+                
+                socket.once('error', (error) => {
+                    clearTimeout(timeout);
+                    reject(new Error(error.message || 'Failed to get RTP capabilities'));
+                });
+            });
+            
+            // Step 3: Create MediaSoup Device
+            console.log('Step 3: Creating MediaSoup device...');
+            const device = new Device();
+            await device.load({ routerRtpCapabilities: rtpCapabilities });
+            deviceRef.current = device;
+            
+            // Step 4: Create Send Transport
+            console.log('Step 4: Creating send transport...');
+            const sendTransportData = await new Promise((resolve, reject) => {
+                const timeout = setTimeout(() => reject(new Error('Send transport creation timeout')), 10000);
+                
+                socket.emit('transport:create', {
+                    meetingId,
+                    direction: 'send',
+                    email: user.email
+                });
+                
+                socket.once('transport:created', (data) => {
+                    clearTimeout(timeout);
+                    resolve(data);
+                });
+                
+                socket.once('error', (error) => {
+                    clearTimeout(timeout);
+                    reject(new Error(error.message || 'Failed to create send transport'));
+                });
+            });
+            
+            // Step 5: Create Send Transport Object
+            console.log('Step 5: Creating send transport object...');
+            const sendTransport = device.createSendTransport({
+                id: sendTransportData.id,
+                iceParameters: sendTransportData.iceParameters,
+                iceCandidates: sendTransportData.iceCandidates,
+                dtlsParameters: sendTransportData.dtlsParameters
+            });
+            
+            sendTransport.on('connect', ({ dtlsParameters }, callback, errback) => {
+                socket.emit('transport:connect', {
+                    meetingId,
+                    transportId: sendTransport.id,
+                    dtlsParameters
+                });
+                callback();
+            });
+            
+            sendTransport.on('produce', async ({ kind, rtpParameters }, callback, errback) => {
+                try {
+                    const result = await new Promise((resolve, reject) => {
+                        // const timeout = setTimeout(() => reject(new Error('Producer creation timeout')), 10000);
+                        
+                        socket.emit('producer:create', {
+                            meetingId,
+                            email: user.email,
+                            transportId: sendTransport.id,
+                            kind,
+                            rtpParameters
                         });
-                        callback();
-                    });
-                    
-                    transport.on('produce', async ({ kind, rtpParameters }, callback, errback) => {
-                        try {
-                            socketRef.current.emit('producer:create', {
-                                meetingId: activeRoom,
-                                email: user.email,
-                                transportId: transport.id,
-                                kind,
-                                rtpParameters
-                            });
-                        } catch (error) {
-                            errback(error);
-                        }
-                    });
-                    
-                    setSendTransport(transport);
-                    console.log('Send transport created');
-                    
-                    // Create producers if we have local stream
-                    if (localStream) {
-                        await createProducers(transport);
-                    }
-                } else {
-                    const transport = device.createRecvTransport({
-                        id,
-                        iceParameters,
-                        iceCandidates,
-                        dtlsParameters
-                    });
-                    
-                    transport.on('connect', ({ dtlsParameters }, callback, errback) => {
-                        socketRef.current.emit('transport:connect', {
-                            meetingId: activeRoom,
-                            transportId: transport.id,
-                            dtlsParameters
+                        
+                        socket.once('producer:created', (data) => {
+                            // clearTimeout(timeout);
+                            resolve(data);
                         });
-                        callback();
+                        
+                        
+                        socket.once('error', (error) => {
+                            // clearTimeout(timeout);
+                            reject(new Error(error.message || 'Failed to create producer'));
+                        });
                     });
                     
-                    setRecvTransport(transport);
-                    console.log('Receive transport created');
+                    callback({ id: result.producerId });
+                } catch (error) {
+                    errback(error);
                 }
-            } catch (error) {
-                console.error('Error creating transport:', error);
+            });
+            
+            sendTransportRef.current = sendTransport;
+            
+            // Step 6: Create Receive Transport
+            console.log('Step 6: Creating receive transport...');
+            const recvTransportData = await new Promise((resolve, reject) => {
+                const timeout = setTimeout(() => reject(new Error('Receive transport creation timeout')), 10000);
+                
+                socket.emit('transport:create', {
+                    meetingId,
+                    direction: 'recv',
+                    email: user.email
+                });
+                
+                socket.once('transport:created', (data) => {
+                    clearTimeout(timeout);
+                    resolve(data);
+                });
+                
+                socket.once('error', (error) => {
+                    clearTimeout(timeout);
+                    reject(new Error(error.message || 'Failed to create receive transport'));
+                });
+            });
+            
+            // Step 7: Create Receive Transport Object
+            console.log('Step 7: Creating receive transport object...');
+            const recvTransport = device.createRecvTransport({
+                id: recvTransportData.id,
+                iceParameters: recvTransportData.iceParameters,
+                iceCandidates: recvTransportData.iceCandidates,
+                dtlsParameters: recvTransportData.dtlsParameters
+            });
+            
+            recvTransport.on('connect', ({ dtlsParameters }, callback, errback) => {
+                socket.emit('transport:connect', {
+                    meetingId,
+                    transportId: recvTransport.id,
+                    dtlsParameters
+                });
+                callback();
+            });
+            
+            recvTransportRef.current = recvTransport;
+            
+            // Step 8: Create Producers (Audio and Video) - ONLY FOR HOST
+            // if (isHost) {
+                console.log('Step 8: Creating producers...');
+                const audioTrack = stream.getAudioTracks()[0];
+                if (audioTrack) {
+                    const audioProducer = await sendTransport.produce({ track: audioTrack });
+                    producersRef.current.set('audio', audioProducer);
+                    console.log('Audio producer created');
+                }
+                
+                const videoTrack = stream.getVideoTracks()[0];
+                if (videoTrack) {
+                    const videoProducer = await sendTransport.produce({ track: videoTrack });
+                    producersRef.current.set('video', videoProducer);
+                    console.log('Video producer created');
+                }
+            // } else {
+            //     console.log('Step 8: Skipping producer creation (participant)');
+            // }
+            
+            // Step 9: Join meeting via API
+            console.log('Step 9: Joining meeting via API...');
+            const response = await fetch(`http://localhost:3001/api/meetings/${meetingId}/action`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    type: 'join',
+                    participantEmail: user.email
+                })
+            });
+            
+            if (!response.ok) {
+                throw new Error('Failed to join meeting');
             }
-        });
+            
+            console.log('Call process completed successfully!');
+            
+        } catch (error) {
+            console.error('Error in call process:', error);
+            console.error('Error occurred at step:', /* add step tracking */);
+            setError(error.message);
+            
+            // Don't call cleanup immediately - let the error be displayed
+            // await cleanupCall();  // Comment this out temporarily
+        }
+    };
 
-        socketRef.current.on('transport:connected', (data) => {
-            console.log('Transport connected:', data.transportId);
-        });
+    // Setup event listeners for incoming producers
+    useEffect(() => {
+        if (!socket) return;
 
-        socketRef.current.on('producer:created', async (data) => {
+        const handleProducerCreated = async (data) => {
             try {
                 const { producerId, kind, email } = data;
                 
-                if (recvTransport && device) {
-                    // Create consumer for new producer
-                    const consumer = await recvTransport.consume({
+                console.log('Producer created:', data, recvTransportRef.current, deviceRef.current);
+                
+                if (recvTransportRef.current && deviceRef.current && producerId) {
+                    // Request consumer creation from server
+                    socket.emit('consumer:create', {
+                        meetingId,
+                        email: user.email,
+                        transportId: recvTransportRef.current.id,
                         producerId,
-                        rtpCapabilities: device.rtpCapabilities,
+                        rtpCapabilities: deviceRef.current.rtpCapabilities
+                    });
+                }
+            } catch (error) {
+                console.error('Error requesting consumer creation:', error);
+            }
+        };
+
+        const handleConsumerCreated = async (data) => {
+            try {
+                const { consumerId, producerId, kind, rtpParameters, email } = data;
+                
+                if (recvTransportRef.current) {
+                    // Create consumer object from server data
+                    const consumer = await recvTransportRef.current.consume({
+                        id: consumerId,
+                        producerId,
+                        kind,
+                        rtpParameters,
                         paused: false
                     });
                     
-                    setConsumers(prev => new Map(prev).set(producerId, consumer));
+                    consumersRef.current.set(producerId, consumer);
                     
                     // Add remote stream
                     const stream = new MediaStream([consumer.track]);
@@ -153,151 +277,96 @@ const GroupCall = ({ user, onLeave, meetingId, socket }) => {
                         userId: email,
                         kind
                     }));
+
                     
                     console.log('Consumer created for producer:', producerId);
                 }
             } catch (error) {
-                console.error('Error creating consumer:', error);
-            }
-        });
-
-        socketRef.current.on('consumer:created', (data) => {
-            console.log('Consumer created:', data);
-        });
-
-        socketRef.current.on('participant:joined', (data) => {
-            console.log('Participant joined:', data);
-            setParticipants(prev => [...prev, { id: data.email, name: data.email }]);
-        });
-
-        socketRef.current.on('participant:left', (data) => {
-            console.log('Participant left:', data);
-            setParticipants(prev => prev.filter(p => p.id !== data.email));
-        });
-
-        return () => {
-            if (socketRef.current) {
-                socketRef.current.disconnect();
+                console.error('Error creating consumer from server data:', error);
             }
         };
-    }, [device, activeRoom, user.email]);
 
-    // Create MediaSoup device when router capabilities are available
-    useEffect(() => {
-        if (routerRtpCapabilities && !device) {
-            const newDevice = new Device();
-            setDevice(newDevice);
-        }
-    }, [routerRtpCapabilities, device]);
+        const handleParticipantJoined = (data) => {
+            console.log('Participant joined:', data);
+            setParticipants(prev => [...prev, { id: data.email, name: data.email }]);
+        };
 
-    // Get router RTP capabilities when room is active
-    useEffect(() => {
-        if (activeRoom && socketRef.current) {
-            socketRef.current.emit('router:rtpCapabilities', { meetingId: activeRoom });
-        }
-    }, [activeRoom]);
+        const handleParticipantLeft = (data) => {
+            console.log('Participant left:', data);
+            setParticipants(prev => prev.filter(p => p.id !== data.email));
+        };
 
-    // Create producers when send transport is ready
-    const createProducers = async (transport) => {
+        socket.on('producer:created', handleProducerCreated);
+        socket.on('consumer:created', handleConsumerCreated);
+        socket.on('participant:joined', handleParticipantJoined);
+        socket.on('participant:left', handleParticipantLeft);
+
+        // Start the call process immediately when component mounts
+        joinCallProcess();
+
+        return () => {
+            socket.off('producer:created', handleProducerCreated);
+            socket.off('consumer:created', handleConsumerCreated);
+            socket.off('participant:joined', handleParticipantJoined);
+            socket.off('participant:left', handleParticipantLeft);
+        };
+    }, [socket, meetingId, user.email]);
+
+    // Cleanup function
+    const cleanupCall = async () => {
+        // Prevent multiple cleanup calls
+        if (isCleaningUpRef.current) return;
+        isCleaningUpRef.current = true;
+        
         try {
-            if (!localStream) return;
-
-            // Create audio producer
-            const audioTrack = localStream.getAudioTracks()[0];
-            if (audioTrack) {
-                const audioProducer = await transport.produce({ track: audioTrack });
-                setProducers(prev => new Map(prev).set('audio', audioProducer));
-                console.log('Audio producer created');
+            // Close all producers
+            for (const producer of producersRef.current.values()) {
+                producer.close();
             }
-
-            // Create video producer
-            const videoTrack = localStream.getVideoTracks()[0];
-            if (videoTrack) {
-                const videoProducer = await transport.produce({ track: videoTrack });
-                setProducers(prev => new Map(prev).set('video', videoProducer));
-                console.log('Video producer created');
+            
+            // Close all consumers
+            for (const consumer of consumersRef.current.values()) {
+                consumer.close();
             }
-        } catch (error) {
-            console.error('Error creating producers:', error);
-        }
-    };
-
-    // Create transports when device is ready
-    useEffect(() => {
-        if (device && activeRoom && !sendTransport && !recvTransport) {
-            // Create send transport
-            socketRef.current.emit('transport:create', {
-                meetingId: activeRoom,
-                direction: 'send',
-                email: user.email
-            });
-
-            // Create receive transport
-            socketRef.current.emit('transport:create', {
-                meetingId: activeRoom,
-                direction: 'recv',
-                email: user.email
-            });
-        }
-    }, [device, activeRoom, sendTransport, recvTransport, user.email]);
-
-    const createRoom = async () => {
-        try {
-            // Get user media
-            const stream = await navigator.mediaDevices.getUserMedia({
-                audio: true,
-                video: true
-            });
-            setLocalStream(stream);
             
-            // Create meeting via backend
-            const response = await fetch('http://localhost:3001/api/meetings/create', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    hostEmail: user.email,
-                    participants: [],
-                    title: 'New Call'
-                })
-            });
+            // Close transports
+            if (sendTransportRef.current) sendTransportRef.current.close();
+            if (recvTransportRef.current) recvTransportRef.current.close();
             
-            if (response.ok) {
-                const result = await response.json();
-                setActiveRoom(result.meeting.meetingId);
+            // Stop local stream
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
             }
-        } catch (error) {
-            console.error('Error creating room:', error);
-        }
-    };
-
-    const joinRoom = async (roomId) => {
-        try {
-            // Get user media
-            const stream = await navigator.mediaDevices.getUserMedia({
-                audio: true,
-                video: true
-            });
-            setLocalStream(stream);
             
-            setActiveRoom(roomId);
+            // Leave meeting via API only if we have a meetingId
+            if (meetingId) {
+                await fetch(`http://localhost:3001/api/meetings/${meetingId}/action`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        type: 'leave',
+                        participantEmail: user.email
+                    })
+                });
+            }
             
-            // Join meeting via API
-            await fetch(`http://localhost:3001/api/meetings/${roomId}/action`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    type: 'join',
-                    participantEmail: user.email
-                })
-            });
+            // Reset refs
+            deviceRef.current = null;
+            sendTransportRef.current = null;
+            recvTransportRef.current = null;
+            producersRef.current.clear();
+            consumersRef.current.clear();
+            
         } catch (error) {
-            console.error('Error joining room:', error);
+            console.error('Error cleaning up call:', error);
+        } finally {
+            isCleaningUpRef.current = false;
         }
     };
 
     const toggleAudio = async () => {
         try {
-            const audioProducer = producers.get('audio');
+            const audioProducer = producersRef.current.get('audio');
             if (audioProducer) {
                 if (isMuted) {
                     await audioProducer.resume();
@@ -313,7 +382,7 @@ const GroupCall = ({ user, onLeave, meetingId, socket }) => {
 
     const toggleVideo = async () => {
         try {
-            const videoProducer = producers.get('video');
+            const videoProducer = producersRef.current.get('video');
             if (videoProducer) {
                 if (isVideoOff) {
                     await videoProducer.resume();
@@ -328,192 +397,88 @@ const GroupCall = ({ user, onLeave, meetingId, socket }) => {
     };
 
     const leaveRoom = async () => {
-        try {
-            // Close all producers
-            for (const producer of producers.values()) {
-                producer.close();
-            }
-            
-            // Close all consumers
-            for (const consumer of consumers.values()) {
-                consumer.close();
-            }
-            
-            // Close transports
-            if (sendTransport) sendTransport.close();
-            if (recvTransport) recvTransport.close();
-            
-            // Stop local stream
-            if (localStream) {
-                localStream.getTracks().forEach(track => track.stop());
-            }
-            
-            // Leave meeting via API
-            if (activeRoom) {
-                await fetch(`http://localhost:3001/api/meetings/${activeRoom}/action`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        type: 'leave',
-                        participantEmail: user.email
-                    })
-                });
-            }
-            
-            // Reset state
-            setLocalStream(null);
-            setRemoteStreams(new Map());
-            setProducers(new Map());
-            setConsumers(new Map());
-            setSendTransport(null);
-            setRecvTransport(null);
-            setDevice(null);
-            setActiveRoom(null);
-            
-            onLeave();
-        } catch (error) {
-            console.error('Error leaving room:', error);
-            onLeave();
-        }
+
+        await cleanupCall();
+        setLocalStream(null);
+        setRemoteStreams(new Map());
+        setParticipants([]);
+        onLeave();
     };
 
-    const endCall = async () => {
-        try {
-            // Close all producers
-            for (const producer of producers.values()) {
-                producer.close();
-            }
-            
-            // Close all consumers
-            for (const consumer of consumers.values()) {
-                consumer.close();
-            }
-            
-            // Close transports
-            if (sendTransport) sendTransport.close();
-            if (recvTransport) recvTransport.close();
-            
-            // Stop local stream
-            if (localStream) {
-                localStream.getTracks().forEach(track => track.stop());
-            }
-            
-            // End call for all participants via socket
-            if (activeRoom && socketRef.current) {
-                socketRef.current.emit('call:end', {
-                    meetingId: activeRoom,
-                    hostEmail: user.email
-                });
-            }
-            
-            // Reset state
-            setLocalStream(null);
-            setRemoteStreams(new Map());
-            setProducers(new Map());
-            setConsumers(new Map());
-            setSendTransport(null);
-            setRecvTransport(null);
-            setDevice(null);
-            setActiveRoom(null);
-            
-            onLeave();
-        } catch (error) {
-            console.error('Error ending call:', error);
-            onLeave();
-        }
-    };
+    if (error) {
+        return (
+            <div className="group-call">
+                <div className="error-message">
+                    <h3>Connection Error</h3>
+                    <p>{error}</p>
+                    <button onClick={leaveRoom}>Leave Call</button>
+                </div>
+            </div>
+        );
+    }
 
     return (
-        <div className="group-call-container">
-            {!activeRoom ? (
-                <div className="room-selection">
-                    <h2>Available Rooms</h2>
-                    <button onClick={createRoom}>Create New Room</button>
-                    <div className="room-list">
-                        {availableRooms.map(room => (
-                            <div key={room.roomId} className="room-item">
-                                <span>Room {room.roomId}</span>
-                                <span>{room.participantCount} participants</span>
-                                <button onClick={() => joinRoom(room.roomId)}>
-                                    Join
+        <div className="group-call">
+            <div className="call-header">
+                <h2>Group Call - {meetingId}</h2>
+                <div className="call-controls">
+                    <button 
+                        onClick={toggleAudio} 
+                        className={`control-btn ${isMuted ? 'muted' : ''}`}
+                    >
+                        {isMuted ? '🔇' : '🔊'}
+                    </button>
+                    <button 
+                        onClick={toggleVideo} 
+                        className={`control-btn ${isVideoOff ? 'video-off' : ''}`}
+                    >
+                        {isVideoOff ? '📹' : '📷'}
+                    </button>
+                    <button onClick={leaveRoom} className="control-btn leave">
+                        ❌ Leave
                                 </button>
-                            </div>
-                        ))}
-                    </div>
                 </div>
-            ) : (
-                <>
-                    <div className="video-grid">
-                        <div className="video-container local">
+            </div>
+
+            <div className="video-container">
+                <div className="local-video">
                             <video
                                 ref={localVideoRef}
                                 autoPlay
                                 playsInline
                                 muted
-                                style={{ display: isVideoOff ? 'none' : 'block' }}
                             />
-                            {isVideoOff && (
-                                <div className="video-placeholder">
-                                    <div className="avatar">{user.name.charAt(0).toUpperCase()}</div>
-                                </div>
-                            )}
-                            <div className="video-label">
-                                You {isMuted && '(Muted)'} {isVideoOff && '(Video Off)'}
+                    <div className="video-label">You</div>
                             </div>
-                        </div>
-                        {Array.from(remoteStreams).map(([streamId, { stream, userId, kind }]) => {
-                            const participant = participants.find(p => p.id === userId);
-                            return (
-                                <div key={streamId} className="video-container remote">
+                
+                {Array.from(remoteStreams.values()).map(({ stream, userId, kind }, index) => (
+                    <div key={index} className="remote-video">
                                     <video
                                         autoPlay
                                         playsInline
-                                        ref={el => {
+                            ref={(el) => {
                                             if (el) el.srcObject = stream;
                                         }}
-                                        style={{ display: kind === 'video' ? 'block' : 'none' }}
                                     />
-                                    {kind === 'audio' && (
-                                        <div className="audio-only">
-                                            <div className="avatar">{userId.charAt(0).toUpperCase()}</div>
-                                        </div>
-                                    )}
-                                    <div className="video-label">
-                                        {participant?.name || userId}
-                                    </div>
-                                </div>
-                            );
-                        })}
+                        <div className="video-label">{userId}</div>
                     </div>
-                    <div className="controls">
-                        <button onClick={toggleAudio} className={isMuted ? 'muted' : ''}>
-                            {isMuted ? '🔇 Unmute' : '🎤 Mute'}
-                        </button>
-                        <button onClick={toggleVideo} className={isVideoOff ? 'video-off' : ''}>
-                            {isVideoOff ? '📹 Start Video' : '📷 Stop Video'}
-                        </button>
-                        <button onClick={leaveRoom} className="leave-btn">
-                            ❌ Leave Room
-                        </button>
-                        <button onClick={endCall} className="end-call-btn">
-                            🚫 End Call
-                        </button>
+                ))}
+
                     </div>
+
                     <div className="participants-list">
-                        <h3>Participants ({participants.length + 1})</h3>
-                        <div className="participant-item">
-                            <div className="avatar">{user.name.charAt(0).toUpperCase()}</div>
-                            <span>{user.name} (You)</span>
-                        </div>
-                        {participants.map(participant => (
+                <h3>Participants ({participants.length + 1})</h3>
+                <div className="participant-item">
+                    <span>{user.email}</span>
+                    <span className="status">You</span>
+                </div>
+                {participants.map((participant) => (
                             <div key={participant.id} className="participant-item">
-                                <div className="avatar">{participant.name.charAt(0).toUpperCase()}</div>
                                 <span>{participant.name}</span>
+                        <span className="status">Connected</span>
                             </div>
                         ))}
                     </div>
-                </>
-            )}
         </div>
     );
 };
