@@ -107,6 +107,28 @@ function App() {
         setIncomingCall({ meetingId, host, title });
       });
 
+      socketRef.current.on('call:accepted', (data) => {
+        const { meetingId, email, hostEmail } = data;
+        
+        console.log('Call accepted by participant:', data);
+        
+        // If this is the host, navigate to video call and close outgoing popup
+        // if (email === hostEmail) {
+          console.log('Host navigating to video call after participant accepted');
+          setActiveRoom(meetingId);
+          setIsHost(true);
+          setOutgoingCall(null);
+          setShowTimeoutMessage(false);
+          
+          // Show success status message
+          setCallStatus({
+            type: 'success',
+            title: 'Call Started',
+            message: `${email} accepted the call`
+          });
+        // }
+      });
+
       socketRef.current.on('call:declined', (data) => {
         const { meetingId, email } = data;
         // Don't dismiss outgoing call popup, just show status update

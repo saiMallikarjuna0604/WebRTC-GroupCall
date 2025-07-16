@@ -374,15 +374,26 @@ async function handleCallAccept(socket, data) {
         console.log('Handling call acceptance:', data);
         const { meetingId, email } = data;
         
-        // Clear timeout and remove from pendingCalls since someone joined the call
+        // Get the pending call to track responses
         const pendingCall = app.locals.pendingCalls.get(meetingId);
         console.log('Pending call for accept:', pendingCall);
+        
         if (pendingCall) {
             // Track that this participant responded
             pendingCall.respondedParticipants.add(email);
-            clearTimeout(pendingCall.timeoutId);
-            app.locals.pendingCalls.delete(meetingId);
-            console.log('Removed from pendingCalls after accept:', meetingId);
+            
+            // Check if ALL participants have responded
+            if (pendingCall.respondedParticipants.size === pendingCall.participants.length) {
+                // All participants responded - clear timeout and remove from pending
+                clearTimeout(pendingCall.timeoutId);
+                app.locals.pendingCalls.delete(meetingId);
+                console.log('All participants responded - removed from pendingCalls:', meetingId);
+            } else {
+                // Keep timeout active for remaining participants
+                console.log('Participant accepted but keeping timeout for others:', meetingId);
+                console.log('Responded participants:', Array.from(pendingCall.respondedParticipants));
+                console.log('Remaining participants:', pendingCall.participants.filter(p => !pendingCall.respondedParticipants.has(p)));
+            }
         }
         
         // Join meeting via API call
@@ -394,17 +405,22 @@ async function handleCallAccept(socket, data) {
         
         if (response.ok) {
             // Notify host about participant acceptance
-            const pendingCall = app.locals.pendingCalls.get(meetingId);
-            if (pendingCall) {
-                const hostSocket = app.locals.connections.get(pendingCall.hostEmail);
-                if (hostSocket) {
-                    hostSocket.emit('participant:status-update', { 
-                        meetingId, 
-                        email, 
-                        status: 'answered',
-                        action: 'accept'
-                    });
-                }
+            const hostSocket = app.locals.connections.get(pendingCall.hostEmail);
+            if (hostSocket) {
+                hostSocket.emit('participant:status-update', { 
+                    meetingId, 
+                    email, 
+                    status: 'answered',
+                    action: 'accept'
+                });
+                
+                // Notify host that someone accepted the call
+                console.log('Notifying host that someone accepted the call:', { meetingId, email, hostEmail: pendingCall.hostEmail });
+                hostSocket.emit('call:accepted', { 
+                    meetingId, 
+                    email,
+                    hostEmail: pendingCall.hostEmail
+                });
             }
             
             // Notify other participants
