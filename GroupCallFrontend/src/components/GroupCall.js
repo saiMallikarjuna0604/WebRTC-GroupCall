@@ -6,7 +6,7 @@ import './GroupCall.css';
 const GroupCall = ({ user, onLeave, meetingId, socket, isHost = false }) => {
     // Only essential UI states - no socket-driven states
     const [localStream, setLocalStream] = useState(null);
-    const [remoteStreams, setRemoteStreams] = useState(new Map());
+    const [remoteStreams, setRemoteStreams] = useState(new Map()); // userId -> { audioTrack, videoTrack, stream }
     const [participants, setParticipants] = useState([]);
     const [isMuted, setIsMuted] = useState(false);
     const [isVideoOff, setIsVideoOff] = useState(false);
@@ -122,6 +122,13 @@ const GroupCall = ({ user, onLeave, meetingId, socket, isHost = false }) => {
             sendTransport.on('produce', async ({ kind, rtpParameters }, callback, errback) => {
                 try {
                     const result = await new Promise((resolve, reject) => {
+
+                        console.log(kind,'kind---------')
+                        console.log(rtpParameters,'rtpParameters---------')
+                        console.log(user.email,'user.email---------')
+                        console.log(sendTransport.id,'sendTransport.id---------')
+                        console.log(meetingId,'meetingId---------')
+
                         // const timeout = setTimeout(() => reject(new Error('Producer creation timeout')), 10000);
                         
                         socket.emit('producer:create', {
@@ -209,6 +216,10 @@ const GroupCall = ({ user, onLeave, meetingId, socket, isHost = false }) => {
                 producersRef.current.set('video', videoProducer);
                 console.log('Video producer created');
             }
+
+            // Signal ready to receive producers after transport setup
+            console.log('Signaling ready to receive producers');
+            socket.emit('client:ready');
             
             // Step 9: Join meeting via API
             console.log('Step 9: Joining meeting via API...');
@@ -249,9 +260,14 @@ const GroupCall = ({ user, onLeave, meetingId, socket, isHost = false }) => {
             try {
                 const { producerId, kind, email } = data;
                 
-                console.log('Producer created:', data, recvTransportRef.current, deviceRef.current);
+                console.log('Producer created event received:', { producerId, kind, email });
+                console.log('Transport and device ready:', { 
+                    recvTransport: !!recvTransportRef.current, 
+                    device: !!deviceRef.current 
+                });
                 
                 if (recvTransportRef.current && deviceRef.current && producerId) {
+                    console.log('Requesting consumer creation for producer:', producerId);
                     // Request consumer creation from server
                     socket.emit('consumer:create', {
                         meetingId,
@@ -259,6 +275,12 @@ const GroupCall = ({ user, onLeave, meetingId, socket, isHost = false }) => {
                         transportId: recvTransportRef.current.id,
                         producerId,
                         rtpCapabilities: deviceRef.current.rtpCapabilities
+                    });
+                } else {
+                    console.log('Cannot create consumer - missing requirements:', {
+                        recvTransport: !!recvTransportRef.current,
+                        device: !!deviceRef.current,
+                        producerId: !!producerId
                     });
                 }
             } catch (error) {
@@ -269,6 +291,14 @@ const GroupCall = ({ user, onLeave, meetingId, socket, isHost = false }) => {
         const handleConsumerCreated = async (data) => {
             try {
                 const { consumerId, producerId, kind, rtpParameters, email } = data;
+                
+                console.log(email,'email')
+                
+                // Add validation to skip own streams
+                if (email === user.email) {
+                    console.log('Skipping own stream');
+                    return;
+                }
                 
                 if (recvTransportRef.current) {
                     // Create consumer object from server data
@@ -282,16 +312,39 @@ const GroupCall = ({ user, onLeave, meetingId, socket, isHost = false }) => {
                     
                     consumersRef.current.set(producerId, consumer);
                     
-                    // Add remote stream
-                    const stream = new MediaStream([consumer.track]);
-                    setRemoteStreams(prev => new Map(prev).set(producerId, {
-                        stream,
-                        userId: email,
-                        kind
-                    }));
+                    // Group streams by user instead of by producer
+                    setRemoteStreams(prev => {
+                        const newMap = new Map(prev);
+                        const existingUser = newMap.get(email);
+                        
+                        if (existingUser) {
+                            // User already exists, add the new track
+                            const tracks = [consumer.track];
+                            if (existingUser.audioTrack) tracks.push(existingUser.audioTrack);
+                            if (existingUser.videoTrack) tracks.push(existingUser.videoTrack);
+                            
+                            const combinedStream = new MediaStream(tracks);
+                            newMap.set(email, {
+                                stream: combinedStream,
+                                userId: email,
+                                audioTrack: kind === 'audio' ? consumer.track : existingUser.audioTrack,
+                                videoTrack: kind === 'video' ? consumer.track : existingUser.videoTrack
+                            });
+                        } else {
+                            // New user, create initial stream
+                            const stream = new MediaStream([consumer.track]);
+                            newMap.set(email, {
+                                stream,
+                                userId: email,
+                                audioTrack: kind === 'audio' ? consumer.track : null,
+                                videoTrack: kind === 'video' ? consumer.track : null
+                            });
+                        }
+                        
+                        return newMap;
+                    });
 
-                    
-                    console.log('Consumer created for producer:', producerId);
+                    console.log('Consumer created for producer:', producerId, 'kind:', kind, 'user:', email);
                 }
             } catch (error) {
                 console.error('Error creating consumer from server data:', error);
@@ -458,17 +511,17 @@ const GroupCall = ({ user, onLeave, meetingId, socket, isHost = false }) => {
 
             <div className="video-container">
                 <div className="local-video">
-                    <video
-                        ref={localVideoRef}
-                        autoPlay
-                        playsInline
-                        muted
-                    />
+                            <video
+                                ref={localVideoRef}
+                                autoPlay
+                                playsInline
+                                muted
+                            />
                     <div className="video-label">You ({user.email})</div>
-                </div>
+                            </div>
                 
-                {Array.from(remoteStreams.values()).map(({ stream, userId, kind }, index) => (
-                    <div key={`${userId}-${kind}`} className="remote-video">
+                                {Array.from(remoteStreams.values()).map(({ stream, userId }, index) => (
+                    <div key={userId} className="remote-video">
                         <video
                             autoPlay
                             playsInline
@@ -479,10 +532,10 @@ const GroupCall = ({ user, onLeave, meetingId, socket, isHost = false }) => {
                                 }
                             }}
                         />
-                        <div className="video-label">{userId} ({kind})</div>
+                        <div className="stream-label">{userId}</div>
                     </div>
                 ))}
-            </div>
+                    </div>
 
                     <div className="participants-list">
                 <h3>Participants ({participants.length + 1})</h3>

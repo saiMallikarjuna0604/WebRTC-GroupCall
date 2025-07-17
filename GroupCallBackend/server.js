@@ -180,7 +180,7 @@ io.on('connection', async (socket) => {
             const { meetingId, email, transportId, kind, rtpParameters } = data;
             const result = await createProducer(meetingId, email, transportId, kind, rtpParameters);
             console.log('Producer created:', result);
-            // socket.emit('producer:created', result);
+            socket.emit('producer:created', result);
         } catch (error) {
             console.error('Producer create error:', error);
             socket.emit('error', { message: 'Failed to create producer' });

@@ -157,6 +157,8 @@ async function createProducer(meetingId, email, transportId, kind, rtpParameters
   if (!transport) throw new Error('Transport not found: ' + transportId);
 
   const producer = await transport.produce({ kind, rtpParameters });
+
+  console.log(producer,'producer---------')
   
   room.producers.set(producer.id, producer);
   const participant = room.participants.get(email);
@@ -164,6 +166,10 @@ async function createProducer(meetingId, email, transportId, kind, rtpParameters
 
   // Notify other participants
   room.participants.forEach((otherParticipant, otherEmail) => {
+    console.log(otherEmail,'otherEmail---------')
+    console.log(room.participants,'room.participants---------')
+    console.log(email,'email---------')
+
     if (otherEmail !== email) {
       otherParticipant.socket.emit('producer:created', {
         producerId: producer.id,
@@ -201,11 +207,28 @@ async function createConsumer(meetingId, email, transportId, producerId, rtpCapa
   const participant = room.participants.get(email);
   participant.consumers.set(producerId, consumer);
 
+  
+
+  // Add code to find producer's email
+  let producerEmail = null;
+  for (const [email, participant] of room.participants) {
+      if (participant.producers.has(consumer.kind)) {
+        console.log(room.participants,consumer,'room.participants---------')
+          const participantProducer = participant.producers.get(consumer.kind);
+          console.log(participantProducer,'participantProducer---------')
+          if (participantProducer && participantProducer.id === producerId) {
+              producerEmail = email;
+              break;
+          }
+      }
+  }
+  
   return {
     consumerId: consumer.id,
     producerId: producerId,
     kind: consumer.kind,
-    rtpParameters: consumer.rtpParameters
+    rtpParameters: consumer.rtpParameters,
+    email: producerEmail  // Correct: This will be producer's email
   };
 }
 
@@ -389,6 +412,55 @@ async function handleJoinMeeting(meeting, participantEmail, res, connections) {
 
   // Add participant to MediaSoup room
   await addParticipantToRoom(meeting.meetingId, participantEmail, connections);
+
+  // Get the MediaSoup room
+  const room = mediaSoupRooms.get(meeting.meetingId);
+  if (room) {
+    const newParticipant = room.participants.get(participantEmail);
+    
+    if (newParticipant && newParticipant.socket) {
+      // Remove setTimeout and add event listener for client readiness
+      newParticipant.socket.on('client:ready', () => {
+        console.log('Client ready, sending existing producers:', participantEmail);
+        // Send existing producers to the new participant
+        room.producers.forEach((producer, producerId) => {
+          console.log('Checking producer:', { producerId, kind: producer.kind });
+
+          console.log('Producer:', room.participants);
+          
+          // Find producer owner by checking all participants
+          let producerOwner = null;
+          for (const [email, participant] of room.participants) {
+            console.log('Participants:', participant);
+
+            if (email !== participantEmail) {
+              if (participant.producers.has(producer.kind)) {
+                const participantProducer = participant.producers.get(producer.kind);
+                if (participantProducer && participantProducer.id === producerId) {
+                  producerOwner = email;
+                  break;
+                }
+              }
+            }
+          }
+          
+          if (producerOwner) {
+            console.log('Notifying new participant about existing producer:', { 
+              producerId, 
+              kind: producer.kind, 
+              owner: producerOwner 
+            });
+            newParticipant.socket.emit('producer:created', {
+              producerId: producer.id,
+              kind: producer.kind,
+              email: producerOwner,
+              rtpParameters: producer.rtpParameters
+            });
+          }
+        });
+      });
+    }
+  }
 
   // Save analytics
   const isHost = meeting.hostEmail === participantEmail;
