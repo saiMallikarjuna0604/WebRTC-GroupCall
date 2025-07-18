@@ -12,7 +12,6 @@ const mediaSoupRooms = new Map(); // meetingId -> room
 async function initializeMediaSoup() {
   if (!mediaSoupWorker) {
     mediaSoupWorker = await createWorker();
-    console.log('MediaSoup worker initialized');
   }
 }
 
@@ -23,7 +22,6 @@ async function createMediaSoupRoom(meetingId) {
   }
   
   if (mediaSoupRooms.has(meetingId)) {
-    console.log('Room already exists:', meetingId);
     return mediaSoupRooms.get(meetingId);
   }
 
@@ -38,14 +36,12 @@ async function createMediaSoupRoom(meetingId) {
   };
 
   mediaSoupRooms.set(meetingId, room);
-  console.log('MediaSoup room created:', meetingId);
   return room;
 }
 
 async function destroyMediaSoupRoom(meetingId) {
   const room = mediaSoupRooms.get(meetingId);
   if (!room) {
-    console.log('Room not found for destruction:', meetingId);
     return;
   }
 
@@ -57,7 +53,6 @@ async function destroyMediaSoupRoom(meetingId) {
   // Close router
   await room.router.close();
   mediaSoupRooms.delete(meetingId);
-  console.log('MediaSoup room destroyed:', meetingId);
 }
 
 async function addParticipantToRoom(meetingId, email, connections) {
@@ -67,29 +62,35 @@ async function addParticipantToRoom(meetingId, email, connections) {
   }
 
   const socket = connections.get(email);
-  const participant = {
-    email,
-    socket,
-    transports: new Map(), // direction -> transport
-    producers: new Map(), // kind -> producer
-    consumers: new Map() // producerId -> consumer
-  };
+  
+  // Check if participant already exists
+  let participant = room.participants.get(email);
+  if (participant) {
+    // Update only the socket if participant exists
+    participant.socket = socket;
+  } else {
+    // Create new participant if doesn't exist
+    participant = {
+      email,
+      socket,
+      transports: new Map(),
+      producers: new Map(),
+      consumers: new Map()
+    };
+    room.participants.set(email, participant);
+  }
 
-  room.participants.set(email, participant);
-  console.log('Participant added to room:', { meetingId, email });
   return participant;
 }
 
 async function removeParticipantFromRoom(meetingId, email) {
   const room = mediaSoupRooms.get(meetingId);
   if (!room) {
-    console.log('Room not found for participant removal:', meetingId);
     return;
   }
 
   const participant = room.participants.get(email);
   if (!participant) {
-    console.log('Participant not found:', email);
     return;
   }
 
@@ -113,7 +114,6 @@ async function removeParticipantFromRoom(meetingId, email) {
 
   // Remove participant
   room.participants.delete(email);
-  console.log('Participant removed from room:', { meetingId, email });
 }
 
 // MediaSoup utility functions
@@ -142,11 +142,9 @@ async function connectTransport(meetingId, transportId, dtlsParameters) {
   if (!room) throw new Error('Room not found: ' + meetingId);
 
   const transport = room.transports.get(transportId);
-  console.log('Transport found:', transport);
   if (!transport) throw new Error('Transport not found: ' + transportId);
 
- const result =  await transport.connect({ dtlsParameters });
- console.log('Transport connected:', result);
+  await transport.connect({ dtlsParameters });
 }
 
 async function createProducer(meetingId, email, transportId, kind, rtpParameters) {
@@ -158,18 +156,12 @@ async function createProducer(meetingId, email, transportId, kind, rtpParameters
 
   const producer = await transport.produce({ kind, rtpParameters });
 
-  console.log(producer,'producer---------')
-  
   room.producers.set(producer.id, producer);
   const participant = room.participants.get(email);
   participant.producers.set(kind, producer);
 
   // Notify other participants
   room.participants.forEach((otherParticipant, otherEmail) => {
-    console.log(otherEmail,'otherEmail---------')
-    console.log(room.participants,'room.participants---------')
-    console.log(email,'email---------')
-
     if (otherEmail !== email) {
       otherParticipant.socket.emit('producer:created', {
         producerId: producer.id,
@@ -180,7 +172,7 @@ async function createProducer(meetingId, email, transportId, kind, rtpParameters
     }
   });
 
-  return { producerId: producer.id,kind,email,rtpParameters: producer.rtpParameters};
+  return { producerId: producer.id, kind, email, rtpParameters: producer.rtpParameters};
 }
 
 async function createConsumer(meetingId, email, transportId, producerId, rtpCapabilities) {
@@ -213,9 +205,7 @@ async function createConsumer(meetingId, email, transportId, producerId, rtpCapa
   let producerEmail = null;
   for (const [email, participant] of room.participants) {
       if (participant.producers.has(consumer.kind)) {
-        console.log(room.participants,consumer,'room.participants---------')
           const participantProducer = participant.producers.get(consumer.kind);
-          console.log(participantProducer,'participantProducer---------')
           if (participantProducer && participantProducer.id === producerId) {
               producerEmail = email;
               break;
@@ -240,12 +230,10 @@ function getRouterRtpCapabilities(meetingId) {
 
 // Analytics operations (in same file)
 async function saveMeetingAnalytics(meetingData) {
-  console.log('Saving meeting analytics:', meetingData);
   // TODO: Implement meeting analytics saving
 }
 
 async function saveParticipantJoin(meetingId, email, isHost = false) {
-  console.log('Saving participant join:', { meetingId, email, isHost });
   try {
     await ParticipantActivity.create({
       meetingId,
@@ -254,12 +242,11 @@ async function saveParticipantJoin(meetingId, email, isHost = false) {
       isHost
     });
   } catch (error) {
-    console.error('Error saving participant join:', error);
+    // console.error('Error saving participant join:', error);
   }
 }
 
 async function saveParticipantLeave(meetingId, email) {
-  console.log('Saving participant leave:', { meetingId, email });
   try {
     const activity = await ParticipantActivity.findOne({ meetingId, email });
     if (activity) {
@@ -268,14 +255,13 @@ async function saveParticipantLeave(meetingId, email) {
       await activity.save();
     }
   } catch (error) {
-    console.error('Error saving participant leave:', error);
+    // console.error('Error saving participant leave:', error);
   }
 }
 
 // Create a new meeting
 router.post('/create', async (req, res) => {
   try {
-    console.log('Meeting: Creating new meeting', req.body);
     const { hostEmail, participants, title, description } = req.body;
     
     // Validate required fields
@@ -325,7 +311,7 @@ router.post('/create', async (req, res) => {
 
     res.json({ meeting, success: true });
   } catch (error) {
-    console.error('Error creating meeting:', error);
+    // console.error('Error creating meeting:', error);
     res.status(500).json({ error: 'Failed to create meeting' });
   }
 });
@@ -333,7 +319,6 @@ router.post('/create', async (req, res) => {
 // Get meeting details
 router.get('/:meetingId', async (req, res) => {
   try {
-    console.log('Meeting: Getting meeting details', req.params.meetingId);
     const { meetingId } = req.params;
     
     const meeting = await Meeting.findOne({ meetingId });
@@ -343,7 +328,7 @@ router.get('/:meetingId', async (req, res) => {
 
     res.json({ meeting });
   } catch (error) {
-    console.error('Error fetching meeting:', error);
+    // console.error('Error fetching meeting:', error);
     res.status(500).json({ error: 'Failed to fetch meeting' });
   }
 });
@@ -357,8 +342,6 @@ router.post('/:meetingId/action', async (req, res) => {
   try {
     const { meetingId } = req.params;
     const { type, hostEmail, participantEmail } = req.body;
-    
-    console.log('Meeting: Action request', { meetingId, type, hostEmail, participantEmail });
     
     const meeting = await Meeting.findOne({ meetingId });
     if (!meeting) {
@@ -376,7 +359,7 @@ router.post('/:meetingId/action', async (req, res) => {
         return res.status(400).json({ error: 'Invalid action type. Use: end, join, or leave' });
     }
   } catch (error) {
-    console.error('Error in meeting action:', error);
+    // console.error('Error in meeting action:', error);
     res.status(500).json({ error: 'Failed to perform meeting action' });
   }
 });
@@ -411,53 +394,31 @@ async function handleJoinMeeting(meeting, participantEmail, res, connections) {
   }
 
   // Add participant to MediaSoup room
-  await addParticipantToRoom(meeting.meetingId, participantEmail, connections);
-
+ const resp= await addParticipantToRoom(meeting.meetingId, participantEmail, connections);
+ console.log(resp,'------resp');
   // Get the MediaSoup room
   const room = mediaSoupRooms.get(meeting.meetingId);
   if (room) {
     const newParticipant = room.participants.get(participantEmail);
     
     if (newParticipant && newParticipant.socket) {
-      // Remove setTimeout and add event listener for client readiness
       newParticipant.socket.on('client:ready', () => {
-        console.log('Client ready, sending existing producers:', participantEmail);
-        // Send existing producers to the new participant
-        room.producers.forEach((producer, producerId) => {
-          console.log('Checking producer:', { producerId, kind: producer.kind });
-
-          console.log('Producer:', room.participants);
-          
-          // Find producer owner by checking all participants
-          let producerOwner = null;
-          for (const [email, participant] of room.participants) {
-            console.log('Participants:', participant);
-
-            if (email !== participantEmail) {
-              if (participant.producers.has(producer.kind)) {
-                const participantProducer = participant.producers.get(producer.kind);
-                if (participantProducer && participantProducer.id === producerId) {
-                  producerOwner = email;
-                  break;
-                }
-              }
-            }
-          }
-          
-          if (producerOwner) {
-            console.log('Notifying new participant about existing producer:', { 
-              producerId, 
-              kind: producer.kind, 
-              owner: producerOwner 
-            });
-            newParticipant.socket.emit('producer:created', {
-              producerId: producer.id,
-              kind: producer.kind,
-              email: producerOwner,
-              rtpParameters: producer.rtpParameters
+        // Iterate over participants first
+        for (const [email, participant] of room.participants) {
+          console.log(participant,'------participant');
+          // Skip the new participant
+          if (email !== participantEmail) {
+            // Get all producers from this participant
+            participant.producers.forEach((producer, producerId) => {
+              newParticipant.socket.emit('producer:created', {
+                producerId: producer.id,
+                kind: producer.kind,
+                email: email,
+                rtpParameters: producer.rtpParameters
+              });
             });
           }
-        });
+        }
       });
     }
   }
@@ -486,7 +447,6 @@ async function handleLeaveMeeting(meeting, participantEmail, res) {
 // Get user's meetings
 router.get('/user/:userEmail', async (req, res) => {
   try {
-    console.log('Meeting: Getting user meetings', req.params.userEmail);
     const { userEmail } = req.params;
     const { status } = req.query;
     
@@ -504,7 +464,7 @@ router.get('/user/:userEmail', async (req, res) => {
     const meetings = await Meeting.find(query).sort({ startTime: -1 });
     res.json({ meetings });
   } catch (error) {
-    console.error('Error fetching user meetings:', error);
+    // console.error('Error fetching user meetings:', error);
     res.status(500).json({ error: 'Failed to fetch user meetings' });
   }
 });
