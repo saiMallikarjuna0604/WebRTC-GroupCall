@@ -130,7 +130,6 @@ const GroupCall = ({ user, onLeave, meetingId, socket, isHost = false }) => {
                 });
                 callback();
             });
-            
             sendTransport.on('produce', async ({ kind, rtpParameters }, callback, errback) => {
                 try {
                     const result = await new Promise((resolve, reject) => {
@@ -241,7 +240,7 @@ const GroupCall = ({ user, onLeave, meetingId, socket, isHost = false }) => {
     // Add endCall function for host
     const endCall = async () => {
         try {
-            // Emit end call event to server
+            // Emit end call event to serverx`x
             socket.emit('call:end', {
                 meetingId,
                 hostEmail: user.email
@@ -364,7 +363,22 @@ const GroupCall = ({ user, onLeave, meetingId, socket, isHost = false }) => {
         };
 
         const handleParticipantLeft = (data) => {
-            console.log('Participant left:', data);
+            // Clean up streams and remove from state in one go
+            setRemoteStreams(prev => {
+                const newMap = new Map(prev);
+                const leavingStream = newMap.get(data.email);
+                
+                // Stop tracks if they exist
+                if (leavingStream?.stream) {
+                    leavingStream.stream.getTracks().forEach(track => track.stop());
+                }
+                
+                // Remove from map
+                newMap.delete(data.email);
+                return newMap;
+            });
+
+            // Update participants list
             setParticipants(prev => prev.filter(p => p.id !== data.email));
         };
 
@@ -484,11 +498,22 @@ const GroupCall = ({ user, onLeave, meetingId, socket, isHost = false }) => {
 
     const leaveRoom = async () => {
 
-        await cleanupCall();
-        setLocalStream(null);
-        setRemoteStreams(new Map());
-        setParticipants([]);
-        onLeave();
+        try {
+            // First notify server
+            socket.emit('call:leave', {
+                meetingId,
+                email: user.email
+            });
+    
+            // Then cleanup local resources
+            await cleanupCall();
+            setLocalStream(null);
+            setRemoteStreams(new Map());
+            setParticipants([]);
+            onLeave();
+        } catch (error) {
+            console.error('Error leaving room:', error);
+        }
     };
 
     if (error) {
@@ -534,33 +559,32 @@ const GroupCall = ({ user, onLeave, meetingId, socket, isHost = false }) => {
 
             <div className="video-container">
                 <div className="local-video">
+                    <video
+                        ref={localVideoRef}
+                        autoPlay
+                        playsInline
+                        muted
+                    />
+                    <div className="video-label">You ({user.email})</div>
+                </div>
+                
+                {Array.from(remoteStreams.values()).map(({ stream, userId }) => 
+                    stream && (
+                        <div key={userId} className="remote-video">
                             <video
-                                ref={localVideoRef}
                                 autoPlay
                                 playsInline
-                                muted
+                                ref={el => {
+                                    if (el) el.srcObject = stream;
+                                }}
                             />
-                    <div className="video-label">You ({user.email})</div>
-                            </div>
-                
-                                {Array.from(remoteStreams.values()).map(({ stream, userId }, index) => (
-                    <div key={userId} className="remote-video">
-                        <video
-                            autoPlay
-                            playsInline
-                            ref={(el) => {
-                                if (el) {
-                                    el.srcObject = stream;
-                                    el.play().catch(e => console.log('Remote video play failed:', e));
-                                }
-                            }}
-                        />
-                        <div className="stream-label">{userId}</div>
-                    </div>
-                ))}
-                    </div>
+                            <div className="stream-label">{userId}</div>
+                        </div>
+                    )
+                )}
+            </div>
 
-                    <div className="participants-list">
+            <div className="participants-list">
                 <h3>Participants ({participants.length + 1})</h3>
                 <div className="participant-item">
                     <span>{user.email}</span>
