@@ -26,7 +26,39 @@ const GroupCall = ({ user, onLeave, meetingId, socket, isHost = false }) => {
     const hasStartedCallRef = useRef(false);
     const eventListenersAddedRef = useRef(false);
 
-    // Sequential call process function
+    // Add transport creation with retry
+    const createTransportWithRetry = async (direction, retryCount = 3, delay = 2000) => {
+        for (let i = 0; i < retryCount; i++) {
+            try {
+                const transportData = await new Promise((resolve, reject) => {
+                    const timeout = setTimeout(() => reject(new Error('Transport creation timeout')), 10000);
+                    
+                    socket.emit('transport:create', {
+                        meetingId,
+                        direction,
+                        email: user.email
+                    });
+                    
+                    socket.once('transport:created', (data) => {
+                        clearTimeout(timeout);
+                        resolve(data);
+                    });
+                    
+                    socket.once('error', (error) => {
+                        clearTimeout(timeout);
+                        reject(new Error(error.message || `Failed to create ${direction} transport`));
+                    });
+                });
+                return transportData;
+            } catch (error) {
+                if (i === retryCount - 1) throw error;
+                await new Promise(resolve => setTimeout(resolve, delay));
+                console.log(`Retrying ${direction} transport creation, attempt ${i + 2}/${retryCount}`);
+            }
+        }
+    };
+
+    // Sequential call process function with step tracking
     const joinCallProcess = async () => {
         // Prevent duplicate call processes
         if (hasStartedCallRef.current) {
@@ -35,11 +67,17 @@ const GroupCall = ({ user, onLeave, meetingId, socket, isHost = false }) => {
         }
         
         hasStartedCallRef.current = true;
+        let stepCompleted = {
+            mediaAccess: false,
+            rtpCapabilities: false,
+            deviceLoaded: false,
+            sendTransport: false,
+            recvTransport: false,
+            producers: false
+        };
         
         try {
             setError(null);
-            
-            console.log('Starting sequential call process...');
             
             // Step 1: Get user media
             console.log('Step 1: Getting user media...');
@@ -48,6 +86,7 @@ const GroupCall = ({ user, onLeave, meetingId, socket, isHost = false }) => {
                 video: true
             });
             setLocalStream(stream);
+            stepCompleted.mediaAccess = true;
             
             if (localVideoRef.current) {
                 localVideoRef.current.srcObject = stream;
@@ -72,34 +111,18 @@ const GroupCall = ({ user, onLeave, meetingId, socket, isHost = false }) => {
                     reject(new Error(error.message || 'Failed to get RTP capabilities'));
                 });
             });
+            stepCompleted.rtpCapabilities = true;
             
             // Step 3: Create MediaSoup Device
             console.log('Step 3: Creating MediaSoup device...');
             const device = new Device();
             await device.load({ routerRtpCapabilities: rtpCapabilities });
             deviceRef.current = device;
+            stepCompleted.deviceLoaded = true;
             
-            // Step 4: Create Send Transport
+            // Step 4: Create Send Transport with retry
             console.log('Step 4: Creating send transport...');
-            const sendTransportData = await new Promise((resolve, reject) => {
-                const timeout = setTimeout(() => reject(new Error('Send transport creation timeout')), 10000);
-                
-                socket.emit('transport:create', {
-                    meetingId,
-                    direction: 'send',
-                    email: user.email
-                });
-                
-                socket.once('transport:created', (data) => {
-                    clearTimeout(timeout);
-                    resolve(data);
-                });
-                
-                socket.once('error', (error) => {
-                    clearTimeout(timeout);
-                    reject(new Error(error.message || 'Failed to create send transport'));
-                });
-            });
+            const sendTransportData = await createTransportWithRetry('send');
             
             // Step 5: Create Send Transport Object
             console.log('Step 5: Creating send transport object...');
@@ -122,15 +145,6 @@ const GroupCall = ({ user, onLeave, meetingId, socket, isHost = false }) => {
             sendTransport.on('produce', async ({ kind, rtpParameters }, callback, errback) => {
                 try {
                     const result = await new Promise((resolve, reject) => {
-
-                        console.log(kind,'kind---------')
-                        console.log(rtpParameters,'rtpParameters---------')
-                        console.log(user.email,'user.email---------')
-                        console.log(sendTransport.id,'sendTransport.id---------')
-                        console.log(meetingId,'meetingId---------')
-
-                        // const timeout = setTimeout(() => reject(new Error('Producer creation timeout')), 10000);
-                        
                         socket.emit('producer:create', {
                             meetingId,
                             email: user.email,
@@ -140,13 +154,10 @@ const GroupCall = ({ user, onLeave, meetingId, socket, isHost = false }) => {
                         });
                         
                         socket.once('producer:created', (data) => {
-                            // clearTimeout(timeout);
                             resolve(data);
                         });
                         
-                        
                         socket.once('error', (error) => {
-                            // clearTimeout(timeout);
                             reject(new Error(error.message || 'Failed to create producer'));
                         });
                     });
@@ -158,28 +169,11 @@ const GroupCall = ({ user, onLeave, meetingId, socket, isHost = false }) => {
             });
             
             sendTransportRef.current = sendTransport;
+            stepCompleted.sendTransport = true;
             
-            // Step 6: Create Receive Transport
+            // Step 6: Create Receive Transport with retry
             console.log('Step 6: Creating receive transport...');
-            const recvTransportData = await new Promise((resolve, reject) => {
-                const timeout = setTimeout(() => reject(new Error('Receive transport creation timeout')), 10000);
-                
-                socket.emit('transport:create', {
-                    meetingId,
-                    direction: 'recv',
-                    email: user.email
-                });
-                
-                socket.once('transport:created', (data) => {
-                    clearTimeout(timeout);
-                    resolve(data);
-                });
-                
-                socket.once('error', (error) => {
-                    clearTimeout(timeout);
-                    reject(new Error(error.message || 'Failed to create receive transport'));
-                });
-            });
+            const recvTransportData = await createTransportWithRetry('recv');
             
             // Step 7: Create Receive Transport Object
             console.log('Step 7: Creating receive transport object...');
@@ -200,25 +194,24 @@ const GroupCall = ({ user, onLeave, meetingId, socket, isHost = false }) => {
             });
             
             recvTransportRef.current = recvTransport;
+            stepCompleted.recvTransport = true;
             
-            // Step 8: Create Producers (Audio and Video) - FOR ALL USERS
+            // Step 8: Create Producers
             console.log('Step 8: Creating producers...');
             const audioTrack = stream.getAudioTracks()[0];
             if (audioTrack) {
                 const audioProducer = await sendTransport.produce({ track: audioTrack });
                 producersRef.current.set('audio', audioProducer);
-                console.log('Audio producer created');
             }
             
             const videoTrack = stream.getVideoTracks()[0];
             if (videoTrack) {
                 const videoProducer = await sendTransport.produce({ track: videoTrack });
                 producersRef.current.set('video', videoProducer);
-                console.log('Video producer created');
             }
+            stepCompleted.producers = true;
 
-            // Signal ready to receive producers after transport setup
-            console.log('Signaling ready to receive producers');
+            // Signal ready to receive producers
             socket.emit('client:ready');
             
             // Step 9: Join meeting via API
@@ -240,14 +233,42 @@ const GroupCall = ({ user, onLeave, meetingId, socket, isHost = false }) => {
             
         } catch (error) {
             console.error('Error in call process:', error);
-            console.error('Error occurred at step:', /* add step tracking */);
+            console.error('Failed at step:', Object.entries(stepCompleted)
+                .find(([key, completed]) => !completed)?.[0]);
+            
+            // Cleanup based on what steps completed
+            if (stepCompleted.sendTransport && sendTransportRef.current) {
+                sendTransportRef.current.close();
+            }
+            if (stepCompleted.recvTransport && recvTransportRef.current) {
+                recvTransportRef.current.close();
+            }
+            if (stepCompleted.mediaAccess && localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+            }
+            
             setError(error.message);
-            
-            // Reset the flag on error so cleanup can work properly
             hasStartedCallRef.current = false;
-            
-            // Don't call cleanup immediately - let the error be displayed
-            // await cleanupCall();  // Comment this out temporarily
+        }
+    };
+
+    // Add endCall function for host
+    const endCall = async () => {
+        try {
+            // Emit end call event to server
+            socket.emit('call:end', {
+                meetingId,
+                hostEmail: user.email
+            });
+
+            // Clean up local resources
+            await cleanupCall();
+            setLocalStream(null);
+            setRemoteStreams(new Map());
+            setParticipants([]);
+            onLeave();
+        } catch (error) {
+            console.error('Error ending call:', error);
         }
     };
 
@@ -361,10 +382,20 @@ const GroupCall = ({ user, onLeave, meetingId, socket, isHost = false }) => {
             setParticipants(prev => prev.filter(p => p.id !== data.email));
         };
 
+        const handleCallEnded = async () => {
+            // Clean up and leave for all participants
+            await cleanupCall();
+            setLocalStream(null);
+            setRemoteStreams(new Map());
+            setParticipants([]);
+            onLeave();
+        };
+
         socket.on('producer:created', handleProducerCreated);
         socket.on('consumer:created', handleConsumerCreated);
         socket.on('participant:joined', handleParticipantJoined);
         socket.on('participant:left', handleParticipantLeft);
+        socket.on('call:ended', handleCallEnded);
 
         // Start the call process immediately when component mounts
         joinCallProcess();
@@ -374,8 +405,8 @@ const GroupCall = ({ user, onLeave, meetingId, socket, isHost = false }) => {
             socket.off('consumer:created', handleConsumerCreated);
             socket.off('participant:joined', handleParticipantJoined);
             socket.off('participant:left', handleParticipantLeft);
+            socket.off('call:ended', handleCallEnded);
             eventListenersAddedRef.current = false;
-            // Don't reset hasStartedCallRef here - let it persist
         };
     }, [socket, meetingId, user.email]);
 
@@ -503,9 +534,15 @@ const GroupCall = ({ user, onLeave, meetingId, socket, isHost = false }) => {
                     >
                         {isVideoOff ? '📹' : '📷'}
                     </button>
-                    <button onClick={leaveRoom} className="control-btn leave">
-                        ❌ Leave
-                                </button>
+                    {isHost ? (
+                        <button onClick={endCall} className="control-btn end">
+                            ❌ End Call
+                        </button>
+                    ) : (
+                        <button onClick={leaveRoom} className="control-btn leave">
+                            ❌ Leave
+                        </button>
+                    )}
                 </div>
             </div>
 
