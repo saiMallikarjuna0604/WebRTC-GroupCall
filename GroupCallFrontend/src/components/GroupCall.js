@@ -67,14 +67,6 @@ const GroupCall = ({ user, onLeave, meetingId, socket, isHost = false }) => {
         }
         
         hasStartedCallRef.current = true;
-        let stepCompleted = {
-            mediaAccess: false,
-            rtpCapabilities: false,
-            deviceLoaded: false,
-            sendTransport: false,
-            recvTransport: false,
-            producers: false
-        };
         
         try {
             setError(null);
@@ -86,7 +78,6 @@ const GroupCall = ({ user, onLeave, meetingId, socket, isHost = false }) => {
                 video: true
             });
             setLocalStream(stream);
-            stepCompleted.mediaAccess = true;
             
             if (localVideoRef.current) {
                 localVideoRef.current.srcObject = stream;
@@ -111,14 +102,12 @@ const GroupCall = ({ user, onLeave, meetingId, socket, isHost = false }) => {
                     reject(new Error(error.message || 'Failed to get RTP capabilities'));
                 });
             });
-            stepCompleted.rtpCapabilities = true;
             
             // Step 3: Create MediaSoup Device
             console.log('Step 3: Creating MediaSoup device...');
             const device = new Device();
             await device.load({ routerRtpCapabilities: rtpCapabilities });
             deviceRef.current = device;
-            stepCompleted.deviceLoaded = true;
             
             // Step 4: Create Send Transport with retry
             console.log('Step 4: Creating send transport...');
@@ -169,7 +158,6 @@ const GroupCall = ({ user, onLeave, meetingId, socket, isHost = false }) => {
             });
             
             sendTransportRef.current = sendTransport;
-            stepCompleted.sendTransport = true;
             
             // Step 6: Create Receive Transport with retry
             console.log('Step 6: Creating receive transport...');
@@ -194,7 +182,6 @@ const GroupCall = ({ user, onLeave, meetingId, socket, isHost = false }) => {
             });
             
             recvTransportRef.current = recvTransport;
-            stepCompleted.recvTransport = true;
             
             // Step 8: Create Producers
             console.log('Step 8: Creating producers...');
@@ -209,7 +196,6 @@ const GroupCall = ({ user, onLeave, meetingId, socket, isHost = false }) => {
                 const videoProducer = await sendTransport.produce({ track: videoTrack });
                 producersRef.current.set('video', videoProducer);
             }
-            stepCompleted.producers = true;
 
             // Signal ready to receive producers
             socket.emit('client:ready');
@@ -233,17 +219,17 @@ const GroupCall = ({ user, onLeave, meetingId, socket, isHost = false }) => {
             
         } catch (error) {
             console.error('Error in call process:', error);
-            console.error('Failed at step:', Object.entries(stepCompleted)
-                .find(([key, completed]) => !completed)?.[0]);
             
-            // Cleanup based on what steps completed
-            if (stepCompleted.sendTransport && sendTransportRef.current) {
+            // Cleanup resources based on refs
+            if (sendTransportRef.current) {
                 sendTransportRef.current.close();
+                sendTransportRef.current = null;
             }
-            if (stepCompleted.recvTransport && recvTransportRef.current) {
+            if (recvTransportRef.current) {
                 recvTransportRef.current.close();
+                recvTransportRef.current = null;
             }
-            if (stepCompleted.mediaAccess && localStream) {
+            if (localStream) {
                 localStream.getTracks().forEach(track => track.stop());
             }
             
